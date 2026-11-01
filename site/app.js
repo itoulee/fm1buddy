@@ -73,7 +73,7 @@ function cases(files) {
       box.innerHTML = `<span class="note">The STLs come with the next release; or make them from <a href="${SCAD}">the OpenSCAD file</a>.</span>`
       continue
     }
-    box.innerHTML = [link(`${config}-base`, 'Base'), link(`${config}-lid`, 'Lid')].join(' ')
+    box.innerHTML = [link(`${config}-base`, 'Base'), link(`${config}-lid`, 'Lid'), has(`${config}-battery-base`) ? link(`${config}-battery-base`, 'With a battery: base') : '', has(`${config}-battery-lid`) ? link(`${config}-battery-lid`, 'With a battery: lid') : ''].join(' ')
   }
 }
 

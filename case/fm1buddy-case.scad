@@ -1,6 +1,7 @@
 // The fm1buddy case for the CYD-S3 (Freenove FNK0104B, ESP32-S3 2.8"): snap-fit, no screws, printed without supports
 // (base: open side up; lid: top side down).
 //
+//   battery  room for a flat LiPo under the board, and a hole for a small slide switch
 //   part     base, lid, or preview (the case open, with a stand-in for the board)
 //
 // openscad -D 'part="lid"' -o lid.stl fm1buddy-case.scad (tools/cases.sh makes them all)
@@ -9,6 +10,7 @@
 // from the floor.
 
 /* [What] */
+battery = false;
 part = "preview";  // [preview, base, lid]
 section = false;   // preview: cut in half, to see the inside
 
@@ -20,11 +22,9 @@ gap = 0.6;    // around the boards
 fit = 0.25;   // between the lid's lip and the walls
 lip_h = 4;
 
-$fn = 48;
-LID_COLOR = "#ff8a3d";   // the installer page's orange
-BASE_COLOR = "#36b37e";
-PCB = 1.57;
-eps = 0.01;
+/* [Battery] */
+bat = [36, 29, 4.75];  // Adafruit 500 mAh (1578); 1200 mAh (258): [34, 62, 5]; 2000 mAh (2011): [60, 36, 7]
+switch_hole = [9, 4.2];  // a mini slide switch (SS12D00), in line with the battery
 
 $fn = 48;
 LID_COLOR = "#ff8a3d";   // the installer page's orange
@@ -33,7 +33,7 @@ PCB = 1.57;
 eps = 0.01;
 
 // ---------------------------------------------------------------------------------------------- board ---
-// the CYD-S3, face up: x from its USB-C end, y from the long edge with the mic (the SD card and BOOT are on the
+// the CYD-S3, face up: x from its USB-C end, y from the long edge with the mic (the SD card, BAT and BOOT are on the
 // other). USB-C, BOOT, RESET, the SD socket and the RGB LED are on its back
 S3 = [86, 50];
 S3_HOLES = [[4, 4], [82, 4], [4, 46], [82, 46]];
@@ -87,13 +87,14 @@ module pegs(holes, h, d_post, d_peg, peg_h) {
 }
 
 // --------------------------------------------------------------------------------------------- CYD-S3 ---
-// the board face up on posts, its USB-C through the x = 0 wall for the OTG
+// the board face up on posts (high enough for a battery under it), its USB-C through the x = 0 wall for the OTG
 // adapter. The box is wider than the board across, so the lid's lip clears the display glass (as wide as the
 // board); posts in the lid hold the board down at its holes. Paperclip holes in the floor reach BOOT and RESET
-s_bz = S3_BACK + 0.8;                                         // the board's underside
+s_bz = (battery ? bat.z + 0.7 : 0) + S3_BACK + 0.8;           // the board's underside
 s_inner_h = s_bz + PCB + S3_FRONT + 0.2;
 sc0 = [-gap, -gap - 1.5];
 sc1 = [S3.x + gap, S3.y + gap + 1.5];
+s_bat = [S3.x - 10 - bat.x, S3.y / 2 - bat.y / 2];           // the battery's corner, toward the far end
 
 module s3_base() {
   usb_z = s_bz - S3_USB.y / 2;
@@ -109,8 +110,9 @@ module s3_base() {
     translate([S3_SD, sc1.y - 1, s_bz - 1.0]) rotate([-90, 0, 0]) cylinder(d = 9, h = wall + 2);
     // BOOT and RESET, for a paperclip from underneath
     for (b = S3_BTN) translate([b.x + 0.4, b.y, -floor_t - 1]) cylinder(d = 2.4, h = floor_t + 2);
-    // thin under the RGB LED, so it shows through
-    translate([S3_LED.x - 4, S3_LED.y - 4, -floor_t + 0.6]) cube([8, 8, floor_t]);
+    // thin under the RGB LED, so it shows through (a battery covers it)
+    if (!battery) translate([S3_LED.x - 4, S3_LED.y - 4, -floor_t + 0.6]) cube([8, 8, floor_t]);
+    if (battery && switch_hole.x > 0) wall_hole(1, [18, sc1.y + wall / 2, bat.z / 2 + 0.5], switch_hole.x, switch_hole.y, 0.5);
   }
 }
 
@@ -131,6 +133,7 @@ module stand_in() {
   translate([8.4, 0, s_bz + PCB]) color("#111") cube([69.2, S3.y, S3_FRONT - 0.2]);
   translate([-0.3, S3_USB.x - 4.5, s_bz - S3_USB.y]) color("#aaa") cube([7.3, 9, S3_USB.y]);
   translate([S3_SD - 7, S3.y - 15, s_bz - 1.9]) color("#bbb") cube([14, 15, 1.9]);
+  if (battery) translate([s_bat.x, s_bat.y, 0.3]) color("silver") cube(bat);
 }
 
 // --------------------------------------------------------------------------------------------- make ---
