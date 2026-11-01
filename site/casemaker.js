@@ -82,6 +82,7 @@ async function viewer(canvas) {
   const scene = new THREE.Scene()
   const camera = new THREE.PerspectiveCamera(35, 1, 1, 2000)
   camera.up.set(0, 0, 1) // OpenSCAD's z is up
+  camera.position.set(0, -200, 100) // (not on the controls' target, or they turn it into NaNs)
   scene.add(new THREE.HemisphereLight(0xffffff, 0x444450, 2.2))
   const sun = new THREE.DirectionalLight(0xffffff, 1.6)
   sun.position.set(-60, -100, 160)
@@ -98,18 +99,34 @@ async function viewer(canvas) {
   const size = () => {
     const w = canvas.clientWidth
     const h = canvas.clientHeight
+    if (!w || !h) {
+      return // (hidden)
+    }
     if (canvas.width !== Math.round(w * renderer.getPixelRatio()) || canvas.height !== Math.round(h * renderer.getPixelRatio())) {
       renderer.setSize(w, h, false)
       camera.aspect = w / h
       camera.updateProjectionMatrix()
+      if (framed) {
+        frame()
+      }
     }
   }
+  // aim at it all, far enough that its bounding sphere fits however it's turned: from where the camera is looking
+  // now, or the first time, from the front, above and to one side
   const frame = () => {
     const box = new THREE.Box3().setFromObject(group)
-    const c = box.getCenter(new THREE.Vector3())
-    const r = box.getSize(new THREE.Vector3()).length() / 2
-    controls.target.copy(c)
-    camera.position.set(c.x + r * 1.1, c.y - r * 2.3, c.z + r * 1.5)
+    if (box.isEmpty()) {
+      return // (nothing there yet)
+    }
+    const sphere = box.getBoundingSphere(new THREE.Sphere())
+    const fov = (camera.fov * Math.PI) / 180
+    const fit = Math.min(fov, 2 * Math.atan(Math.tan(fov / 2) * camera.aspect))
+    let dir = camera.position.clone().sub(controls.target).normalize()
+    if (!framed || !Number.isFinite(dir.x)) {
+      dir = new THREE.Vector3(1.1, -2.3, 1.5).normalize()
+    }
+    controls.target.copy(sphere.center)
+    camera.position.copy(sphere.center).addScaledVector(dir, (sphere.radius / Math.sin(fit / 2)) * 1.04)
     controls.update()
     framed = true
   }
@@ -120,9 +137,9 @@ async function viewer(canvas) {
   })
   return {
     has: (name) => !!meshes[name],
-    // aim at it all, the first time
+    // aim at it all (after it changed: a taller base)
     fit() {
-      if (!framed && meshes.base) {
+      if (meshes.base) {
         frame()
       }
     },

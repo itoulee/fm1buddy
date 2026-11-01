@@ -223,7 +223,8 @@ td {
   display: block;
   width: 100%;
   height: auto;
-  aspect-ratio: 9 / 7;
+  aspect-ratio: 1;
+  object-fit: contain;
   touch-action: none;
   cursor: grab;
 }
