@@ -1,5 +1,5 @@
-# Builds the CYD-S3's firmware, and the case's STLs (to check the OpenSCAD file still renders: the page makes them
-# itself). Every run keeps them as artifacts; tags (v0.2) also get a release with the firmware attached.
+# Builds the CYD-S3's firmware. Every run keeps it as a "firmware" artifact; tags (v0.2) also get a release with it
+# attached. (The case's STLs are made on the installer page, from case/fm1buddy-case.scad.)
 name: build
 on:
   push:
@@ -33,15 +33,3 @@ jobs:
           files: |
             build/fm1buddy-cyd-s3.bin
           fail_on_unmatched_files: true
-
-  cases:
-    runs-on: ubuntu-latest
-    container: openscad/openscad:dev.2026-09-28
-    steps:
-      - uses: actions/checkout@v4
-      - run: tools/cases.sh
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cases
-          path: build/case/*.stl
-          if-no-files-found: error
