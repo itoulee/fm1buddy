@@ -14,7 +14,7 @@
 #define HUB_ETAG DATA_DIR "/hub.etag"
 // the SMK-37's firmwares: the Hub doesn't host their packages, so fm1buddy's site lists them where their makers keep
 // them (tools/smk37.py), each pkg a whole URL
-#define SMK_LIST "https://konsumer.github.io/fm1buddy/smk37.json"
+#define SMK_LIST "https://konsumer.js.org/fm1buddy/smk37.json"  // (the site's own domain: github.io sends it there over http)
 #define SMK_CACHE DATA_DIR "/smk37.json"
 #define SMK_ETAG DATA_DIR "/smk37.etag"
 #define INSTALLS_DIR DATA_DIR "/installs"  // a record of each install
