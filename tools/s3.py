@@ -8,6 +8,8 @@
 #   tools/s3.py cat PATH         print a file on the SD card (fm1buddy/installs/3.txt); ls [PATH] lists a folder
 #   tools/s3.py host [SCRIPT]    restart it as the USB host for 40 s (then it's back here): to test that. SCRIPT runs
 #                                meanwhile, as the console can't: "tap X Y" and "wait MS" between ';'
+#   tools/s3.py disk             restart it as a USB disk for this computer: prints where its SD card is mounted
+#   tools/s3.py eject            eject that disk: it comes back here by itself (waits for its serial port)
 #   tools/s3.py usbmidi          restart it as a USB MIDI device for this computer (Settings > On a computer)
 #   tools/s3.py serial           and back: sends it the SysEx that brings the serial port back (needs python-rtmidi)
 #
@@ -88,11 +90,47 @@ def to_serial():
     out.send_message(TO_SERIAL)
     time.sleep(0.3)
     out.close_port()
-    for _ in range(50):  # it restarts: wait for its serial port
+    if not wait_serial(10):  # it restarts: wait for its serial port
+        sys.exit('it didn\'t come back as a serial port')
+
+def mounted():
+    """where its SD card is mounted (a volume with a fm1buddy folder), or None"""
+    for v in glob.glob('/Volumes/*') + glob.glob('/media/*/*') + glob.glob('/run/media/*/*'):
+        if os.path.isdir(os.path.join(v, 'fm1buddy')):
+            return v
+    return None
+
+def wait_serial(secs):
+    for _ in range(int(secs * 5)):
         time.sleep(0.2)
         if glob.glob('/dev/cu.usbmodem*') + glob.glob('/dev/ttyACM*'):
+            return True
+    return False
+
+def disk():
+    command('disk', 0.5)
+    for _ in range(150):
+        time.sleep(0.2)
+        v = mounted()
+        if v:
+            print(v)
             return
-    sys.exit('it didn\'t come back as a serial port')
+    sys.exit('its SD card didn\'t show up as a disk')
+
+def eject():
+    v = mounted()
+    if not v:
+        sys.exit('its SD card isn\'t mounted')
+    import subprocess
+    cmd = ['diskutil', 'eject', v] if sys.platform == 'darwin' else ['umount', v]
+    for _ in range(15):  # (macOS's Spotlight can hold a just-mounted disk for a few seconds)
+        if subprocess.run(cmd, capture_output=True).returncode == 0:
+            break
+        time.sleep(1)
+    else:
+        sys.exit('it didn\'t eject: ' + ' '.join(cmd))
+    if not wait_serial(20):
+        sys.exit('it didn\'t come back as a serial port')
 
 if __name__ == '__main__':
     a = sys.argv[1:]
@@ -110,9 +148,13 @@ if __name__ == '__main__':
         command(' '.join(a), 1)
     elif a[:1] == ['host'] and len(a) <= 2:
         command(' '.join(['host'] + a[1:2]), 0.5)
+    elif a == ['disk']:
+        disk()
+    elif a == ['eject']:
+        eject()
     elif a == ['usbmidi']:
         command('usbmidi', 0.5)
     elif a == ['serial']:
         to_serial()
     else:
-        sys.exit('tools/s3.py shot FILE | tap X Y | drag X1 Y1 X2 Y2 | log | cat PATH | ls [PATH] | host [SCRIPT] | usbmidi | serial')
+        sys.exit('tools/s3.py shot FILE | tap X Y | drag X1 Y1 X2 Y2 | log | cat PATH | ls [PATH] | host [SCRIPT] | disk | eject | usbmidi | serial')

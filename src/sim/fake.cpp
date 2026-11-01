@@ -46,6 +46,7 @@ static struct {
   bool fomajam, playing;
   bool sloop;    // it runs SLOOP (its editor protocol: sloopAnswer)
   bool felucca;  // ... or plain Felucca (the same, but 3 sample slots, no backups)
+  bool smk;      // it's an SMK-37 Elite on its stock firmware (the FM-1's chip and update, its own name)
   std::vector<uint8_t> song, kits, in;
   uint32_t inTotal, inGot;
 } f;
@@ -168,15 +169,18 @@ static bool flashGood() {
   if (!p) {
     return false;
   }
-  std::vector<uint8_t> file(size + 20);
-  bool read = fread(file.data(), 1, file.size(), p) == file.size();
+  fseek(p, 0, SEEK_END);
+  uint32_t blocks = ftell(p) - size;  // a marker byte in each interleave block
+  fseek(p, 0, SEEK_SET);
+  std::vector<uint8_t> file(size + blocks);
+  bool read = blocks >= 20 && blocks <= 64 && fread(file.data(), 1, file.size(), p) == file.size();
   fclose(p);
   if (!read || f.flash.size() != size) {
     return false;
   }
   std::vector<uint8_t> image;
   for (uint32_t i = 0; i < file.size(); i++) {
-    if (i >= 20 * 48 || i % 48 != 47) {
+    if (i >= blocks * 48 || i % 48 != 47) {
       image.push_back(file[i]);
     }
   }
@@ -572,6 +576,10 @@ void fake::feluccaMode(bool on) {
   f.sloop = f.felucca = on;
 }
 
+void fake::smkMode(bool on) {
+  f.smk = on;
+}
+
 // ------------------------------------------------------------------------------- its boot loader ---
 // F0 22 24 35 7D F7 sends it there: then it's a USB storage device (4C4A:8057) answering JieLi's commands (uboot.h),
 // slow to answer at first, until it's told to run its firmware again. Its flash: 1 MiB, made up
@@ -616,6 +624,9 @@ static void ubootEnter() {
       ub.flash[i] = (uint8_t)((i * 2654435761u) >> 24);
     }
     memcpy(&ub.flash[0x93000], f.ident.c_str(), f.ident.size());  // (something to find)
+    if (f.smk) {
+      memcpy(&ub.flash[0xC1224], "trimdat", 7);  // (the SMK-37's calibration: its own, uboot.h SMK_CAL)
+    }
   }
 }
 
@@ -766,7 +777,7 @@ static void fromHost(const uint8_t* b, uint32_t n) {
     uint32_t size = fm1::imageSize;
     if (f.state == decltype(f.state)::VERIFY) {
       if (f.addr == 0xE0000000u) {
-        restart(decltype(f.state)::LOADER, "ota-FM-1_900");
+        restart(decltype(f.state)::LOADER, f.smk ? "ota-SMK-37 Elite_900" : "ota-FM-1_900");
       } else if (++f.verifies < 4) {
         request(f.verifies * 4096, 512);
       } else {
@@ -780,7 +791,7 @@ static void fromHost(const uint8_t* b, uint32_t n) {
       } else if (f.faults && !f.unplugged && f.addr > size * 2 / 5) {
         f.unplugged = true;
         hal::log("fake fm-1: unplugged while writing");
-        restart(decltype(f.state)::LOADER, "ota-FM-1_900");
+        restart(decltype(f.state)::LOADER, f.smk ? "ota-SMK-37 Elite_900" : "ota-FM-1_900");
       } else if (f.addr + f.len >= size) {
         request(0xF0000000u, 0);
       } else {
@@ -920,7 +931,8 @@ void fake::keysClock(bool on) {
 
 static void run(bool fm1, bool keys) {
   if (fm1) {
-    f.ident = f.fomajam ? "FM-1_961" : "FM-1_015";
+    f.ident = f.smk ? "SMK-37 Elite_016" : f.fomajam ? "FM-1_961"
+                                                     : "FM-1_015";
     f.next = decltype(f.state)::RUN;
     f.mountAt = hal::millis() + 500;
   }
@@ -935,8 +947,9 @@ static void run(bool fm1, bool keys) {
       f.mountAt = 0;
       f.state = (decltype(f.state))f.next;
       midi::mount(FM1, 0x1209, 0x0001,
-                  f.state == decltype(f.state)::LOADER ? "ota-FM-1"
+                  f.state == decltype(f.state)::LOADER ? (f.smk ? "ota-SMK-37 Elite" : "ota-FM-1")
                   : f.fomajam || f.sloop               ? "Felucca"
+                  : f.smk                              ? "SMK-37 Elite"
                                                        : "FM-1");
     }
     if (f.waiting && now - f.askedAt > 1000) {

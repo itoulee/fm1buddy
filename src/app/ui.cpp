@@ -1,6 +1,9 @@
 // The app's frame: the theme, the rail on the left (the tabs, and what's on), pages, and watching the jobs
 #include "ui.h"
 
+#include <ctype.h>
+#include <string.h>
+
 #include "catalog.h"
 #include "fm1.h"
 #include "hal.h"
@@ -262,6 +265,27 @@ static void railStatus() {
   lv_obj_set_style_text_color(stFm1, color(!id ? t.dim : id->ota() ? t.knob[1]
                                                                    : t.accent),
                               0);
+  const char* name = !id ? "NO" : isSmk(id->model) ? "SMK"
+                                                   : "FM-1";  // (what's on the hub: an FM-1, an SMK-37, none)
+  if (strcmp(lv_label_get_text(stFm1), name)) {
+    lv_label_set_text(stFm1, name);
+  }
+}
+
+std::string ui::devText(const std::string& text) {
+  const char* name = fm1::machineName();
+  if (!strcmp(name, "FM-1")) {
+    return text;
+  }
+  std::string o;
+  size_t at = 0;
+  for (size_t k; (k = text.find("FM-1", at)) != std::string::npos; at = k + 4) {
+    char before = k ? text[k - 1] : ' ', after = k + 4 < text.size() ? text[k + 4] : ' ';
+    bool word = !isalnum((unsigned char)before) && before != '-' && !isalnum((unsigned char)after) && after != '_' &&
+                after != '+' && after != '-';
+    o += text.substr(at, k - at) + (word ? name : "FM-1");
+  }
+  return o + text.substr(at);
 }
 
 static void markTab() {
@@ -343,7 +367,7 @@ static void build() {
   stBt = label(radios, LV_SYMBOL_BLUETOOTH, &lv_font_montserrat_16, t.dim);
   lv_obj_set_style_opa(stBt, LV_OPA_TRANSP, 0);
   stSd = label(rail, LV_SYMBOL_SD_CARD, &lv_font_montserrat_16, t.dim);
-  stFm1 = label(rail, "FM-1", &lv_font_montserrat_12, t.dim);
+  stFm1 = label(rail, "NO", &lv_font_montserrat_12, t.dim);
 
   pageObj = ui::box(scr);
   lv_obj_set_size(pageObj, PAGE_W, SCREEN_H);

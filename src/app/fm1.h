@@ -11,20 +11,30 @@
 
 #include <atomic>
 
-// who a device says it is ("FM-1_904", "ota-FM-1_900")
+// who a device says it is ("FM-1_904", "ota-FM-1_900", "SMK-37 Elite_016")
 struct Fm1Id {
   char text[28];
-  char model[24];  // "FM-1", "ota-FM-1"
+  char model[24];  // "FM-1", "ota-FM-1", "SMK-37 Elite"
   uint32_t version;
   bool ota() const;
 };
+
+// the SMK-37 Pro, SMK-37 Elite, MKE-P37 and Starrykey 37 Play: the FM-1's chip in a keyboard, one keyboard under
+// several names. Models as in "SMK-37 Elite_016" (an "ota-" in front, the update loader's, is ignored)
+bool isSmk(const char* model);
+// a and b run the same firmwares: the same model, or both of the SMK-37's (never an FM-1 and an SMK-37)
+bool sameHardware(const char* a, const char* b);
+
+// a .fwsc's head (n bytes from its start): who it's for ("FM-1_015", "SMK-37 Elite_016"), into product (up to max),
+// and its interleave blocks (blocks: 20, or more: the SMK-37's stock packages have 36). False if it isn't a package
+bool pkgHead(const uint8_t* raw, uint32_t n, char* product, uint32_t max, uint32_t& blocks);
 
 // a .fwsc, read from the SD card into memory once (and checked), so the install never waits on the card
 struct Pkg {
   uint8_t* image = 0;     // the logical image
   uint32_t size = 0;      // its size
   uint32_t fileSize = 0;  // the .fwsc's
-  char product[24] = "";  // "FM-1_904"
+  char product[24] = "";  // "FM-1_904", "SMK-37 Elite_016"
   char sha256[65] = "";   // the .fwsc's
   char path[160] = "";
   // 0, or what's wrong with it
@@ -65,6 +75,9 @@ uint32_t frame(uint8_t cmd, const uint8_t* payload, uint32_t n, uint8_t* out);
 int unframe(const uint8_t* pkt, uint32_t n, uint8_t cmd, uint8_t* out, uint32_t max);
 // the first device that answered, -1 if none
 int current();
+// what to call it on screen: "SMK" when the one on the hub is an SMK-37, else "FM-1" (with none: the last one seen,
+// kept across restarts)
+const char* machineName();
 extern std::atomic<bool> busy;  // installing
 // the package being installed (for the simulator's pretend FM-1)
 extern std::atomic<uint32_t> imageSize;

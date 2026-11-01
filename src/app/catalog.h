@@ -12,13 +12,18 @@
 #define DATA_DIR "/fm1buddy"
 #define HUB_CACHE DATA_DIR "/hub.json"
 #define HUB_ETAG DATA_DIR "/hub.etag"
+// the SMK-37's firmwares: the Hub doesn't host their packages, so fm1buddy's site lists them where their makers keep
+// them (tools/smk37.py), each pkg a whole URL
+#define SMK_LIST "https://konsumer.github.io/fm1buddy/smk37.json"
+#define SMK_CACHE DATA_DIR "/smk37.json"
+#define SMK_ETAG DATA_DIR "/smk37.etag"
 #define INSTALLS_DIR DATA_DIR "/installs"  // a record of each install
 
 struct Firmware {
   std::string name, author, version, date, what;
-  std::string pkg;      // on the Hub: "fw/zp12-2.4.4.fwsc"
+  std::string pkg;      // on the Hub: "fw/zp12-2.4.4.fwsc" (or a whole URL: the SMK-37's)
   std::string file;     // its file name: "zp12-2.4.4.fwsc"
-  std::string product;  // the device it's for: "FM-1_974"
+  std::string product;  // the device it's for: "FM-1_974", "SMK-37 Elite_961"
   std::string sha256;
   std::vector<std::string> kinds;  // "synth", "groove", "drums", ...
   uint32_t size = 0, stars = 0, installs = 0;
@@ -33,7 +38,7 @@ extern std::string hubUpdated;  // when the Hub's list was made: "2026-10-22 05:
 
 // a path on the SD card ("/fm1/x.fwsc" -> "/sdcard/fm1/x.fwsc"), "" without a card
 std::string path(const std::string& p);
-// read the Hub's list from the SD card into out: false (err says why) if it isn't there or doesn't read
+// read the Hub's list (and the SMK-37's) from the SD card into out: false (err says why) if it isn't there or doesn't read
 bool parseHub(std::vector<Firmware>& out, std::string& updated, std::string& err);
 // the files in /fm1, with what the Hub's list knows about them; marks the Hub's that are there
 void scanSd();

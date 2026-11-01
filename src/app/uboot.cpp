@@ -310,3 +310,7 @@ void uboot::leave() {
 bool uboot::stuck() {
   return hal::storageThere(VID, PID);
 }
+
+bool uboot::smkFlash(const std::vector<uint8_t>& flash) {
+  return flash.size() >= SMK_MARK + 7 && !memcmp(&flash[SMK_MARK], "trimdat", 7);
+}

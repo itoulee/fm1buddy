@@ -61,7 +61,7 @@ static void showProgress() {
   lv_obj_update_flag(bar, LV_OBJ_FLAG_HIDDEN, !on);
   if (on) {
     uint32_t t = jobs::total, d = jobs::done;
-    lv_label_set_text(status, jobs::status().c_str());
+    lv_label_set_text(status, devText(jobs::status()).c_str());
     lv_bar_set_value(bar, t ? (int32_t)((uint64_t)d * 100 / t) : 0, LV_ANIM_OFF);
   }
 }
@@ -78,7 +78,7 @@ static void jobEnded() {
   }
   std::string msg;
   if (!jobs::ok) {
-    msg = jobs::error;
+    msg = devText(jobs::error);
     if (k == jobs::SLOOP_RESTORE && !jobs::saved.empty()) {
       msg += " (how it was is in " + jobs::saved + ")";
     }
@@ -87,7 +87,7 @@ static void jobEnded() {
   } else if (k == jobs::SLOOP_RESTORE) {
     msg = "Restored. How it was before is in " + jobs::saved + ".";
   } else {
-    msg = k == jobs::SLOOP_PROJECT ? "The project is on the FM-1." : "The samples are on the FM-1.";
+    msg = k == jobs::SLOOP_PROJECT ? devText("The project is on the FM-1.") : devText("The samples are on the FM-1.");
   }
   toast(msg.c_str(), !jobs::ok);
   go(k == jobs::SLOOP_SAMPLES ? samplesPage : k == jobs::SLOOP_BACKUP ? sloopPage
@@ -101,7 +101,7 @@ static void jobEnded() {
 static const sounds::Speaks* device(lv_obj_t* body) {
   const sounds::Speaks* s = soundsSpeaks();
   if (!s || !s->sloop || s->proto < 6) {
-    wrapped(body, "The FM-1 isn't running SLOOP 2.3 or later (or it went): see the Sounds page.", theme().knob[0]);
+    wrapped(body, devText("The FM-1 isn't running SLOOP 2.3 or later (or it went): see the Sounds page.").c_str(), theme().knob[0]);
     return 0;
   }
   return s;
@@ -111,7 +111,7 @@ static const sounds::Speaks* device(lv_obj_t* body) {
 static const sounds::Speaks* slotDevice(lv_obj_t* body) {
   const sounds::Speaks* s = soundsSpeaks();
   if (!s || !s->slots) {
-    wrapped(body, "The FM-1's firmware has no sample slots (or it went): see the Sounds page.", theme().knob[0]);
+    wrapped(body, devText("The FM-1's firmware has no sample slots (or it went): see the Sounds page.").c_str(), theme().knob[0]);
     return 0;
   }
   return s;
@@ -276,7 +276,7 @@ static void backupFilePage(lv_obj_t* page) {
   }
   lv_obj_t* r = button(body, LV_SYMBOL_UPLOAD "  Restore all of it", restoreTapped);
   lv_obj_add_state(r, LV_STATE_CHECKED);
-  wrapped(body, "Everything on the FM-1 is replaced by it. It's backed up first, to go back to.", t.dim);
+  wrapped(body, devText("Everything on the FM-1 is replaced by it. It's backed up first, to go back to.").c_str(), t.dim);
   progressBox(body);
 
   // its projects, one at a time
@@ -293,7 +293,7 @@ static void backupFilePage(lv_obj_t* page) {
     lv_obj_set_flex_grow(l, 1);
     button(row, "Load", projectTapped, (void*)(intptr_t)id);
   }
-  wrapped(body, "Load replaces that project on the FM-1 (the working project: what it plays now).", t.dim);
+  wrapped(body, devText("Load replaces that project on the FM-1 (the working project: what it plays now).").c_str(), t.dim);
   lv_obj_t* d = button(body, LV_SYMBOL_TRASH "  Delete the backup", deleteTapped);
   lv_obj_set_style_margin_top(d, 6, 0);
   showProgress();
