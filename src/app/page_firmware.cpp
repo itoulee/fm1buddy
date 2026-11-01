@@ -17,13 +17,12 @@ using namespace ui;
 
 enum Source { SD,
               HUB };
-enum Sort { POPULAR,
-            NEWEST,
+enum Sort { NEWEST,
             NAME };
 
 static Source source = SD;
 static bool sourceChosen, hubAsked;
-static int sortBy = POPULAR;
+static int sortBy = NEWEST;
 static std::string kindFilter;  // "": all
 // the machines a firmware can be for (an SMK-37 package says which model), and which the lists show: the Hub's, the
 // one on the hub until another is picked (-1); the SD card's, all (-1) until one is picked
@@ -113,8 +112,6 @@ static std::vector<const Firmware*> shown() {
     std::stable_sort(v.begin(), v.end(), [](const Firmware* a, const Firmware* b) {
       if (a->stock != b->stock)
         return a->stock;  // M-VAVE's own first
-      if (sortBy == POPULAR && a->stars != b->stars)
-        return a->stars > b->stars;
       if (sortBy == NEWEST && a->date != b->date)
         return a->date > b->date;
       return strcasecmp(a->name.c_str(), b->name.c_str()) < 0;
@@ -132,46 +129,76 @@ static void wifiSettings(lv_event_t*) {
   go(SETTINGS, wifiPage);
 }
 
+// the list is made a few rows at a time (240 of them at once held the page for a second), while the spinner turns
+#define FILL_CHUNK 6
+static std::vector<const Firmware*> filling;  // the rows still to make
+static size_t filled;
+static lv_timer_t* fillTimer;
+
+static void fillRow(const Firmware* f) {
+  const Theme& t = theme();
+  lv_obj_t* r = listRow(list, open, (void*)f);
+  lv_obj_t* left = box(r);
+  lv_obj_set_flex_grow(left, 1);
+  lv_obj_t* n = line(left, f->name.c_str(), &lv_font_montserrat_16, t.text);
+  lv_obj_set_width(n, LV_PCT(100));
+  std::string sub = f->author;
+  if (!f->version.empty()) {
+    sub += (sub.empty() ? "v" : "  v") + f->version;
+  }
+  if (sub.empty()) {
+    sub = f->product.empty() ? "not a firmware package" : f->product;
+  }
+  lv_obj_t* s = line(left, sub.c_str(), &lv_font_montserrat_12, t.dim);
+  lv_obj_set_width(s, LV_PCT(100));
+
+  lv_obj_t* right = box(r);
+  lv_obj_set_width(right, LV_SIZE_CONTENT);
+  lv_obj_set_flex_align(right, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+  if (!f->kinds.empty()) {
+    label(right, f->kinds[0].c_str(), &lv_font_montserrat_12, kindColor(f->kinds[0]));
+  }
+  lv_obj_t* tags = box(right, LV_FLEX_FLOW_ROW);
+  lv_obj_set_width(tags, LV_SIZE_CONTENT);
+  lv_obj_set_style_pad_column(tags, 4, 0);
+  if (f->beta) {
+    label(tags, "beta", &lv_font_montserrat_12, t.knob[1]);
+  } else if (source == HUB && f->onSd) {
+    label(tags, LV_SYMBOL_SD_CARD, &lv_font_montserrat_12, t.accent);
+  }
+  int m = machineOf(f->product);
+  if (m >= 0) {
+    label(tags, MACHINE_NAMES[m], &lv_font_montserrat_12, m == FM1 ? t.dim : t.knob[3]);
+  }
+}
+
+static void stopFill() {
+  if (fillTimer) {
+    lv_timer_delete(fillTimer);
+    fillTimer = 0;
+  }
+  filling.clear();
+  filled = 0;
+}
+
+static void fillMore(lv_timer_t*) {
+  size_t end = filled + FILL_CHUNK < filling.size() ? filled + FILL_CHUNK : filling.size();
+  for (; filled < end; filled++) {
+    fillRow(filling[filled]);
+  }
+  if (filled < filling.size()) {
+    return;
+  }
+  stopFill();
+}
+
 static void fillList() {
   const Theme& t = theme();
+  stopFill();
   lv_obj_clean(list);
-  std::vector<const Firmware*> v = shown();
-  for (const Firmware* f : v) {
-    lv_obj_t* r = listRow(list, open, (void*)f);
-    lv_obj_t* left = box(r);
-    lv_obj_set_flex_grow(left, 1);
-    lv_obj_t* n = line(left, f->name.c_str(), &lv_font_montserrat_16, t.text);
-    lv_obj_set_width(n, LV_PCT(100));
-    std::string sub = f->author;
-    if (!f->version.empty()) {
-      sub += (sub.empty() ? "v" : "  v") + f->version;
-    }
-    if (sub.empty()) {
-      sub = f->product.empty() ? "not a firmware package" : f->product;
-    }
-    lv_obj_t* s = line(left, sub.c_str(), &lv_font_montserrat_12, t.dim);
-    lv_obj_set_width(s, LV_PCT(100));
-
-    lv_obj_t* right = box(r);
-    lv_obj_set_width(right, LV_SIZE_CONTENT);
-    lv_obj_set_flex_align(right, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-    if (!f->kinds.empty()) {
-      label(right, f->kinds[0].c_str(), &lv_font_montserrat_12, kindColor(f->kinds[0]));
-    }
-    lv_obj_t* tags = box(right, LV_FLEX_FLOW_ROW);
-    lv_obj_set_width(tags, LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_column(tags, 4, 0);
-    if (f->beta) {
-      label(tags, "beta", &lv_font_montserrat_12, t.knob[1]);
-    } else if (source == HUB && f->onSd) {
-      label(tags, LV_SYMBOL_SD_CARD, &lv_font_montserrat_12, t.accent);
-    }
-    int m = machineOf(f->product);
-    if (m >= 0) {
-      label(tags, MACHINE_NAMES[m], &lv_font_montserrat_12, m == FM1 ? t.dim : t.knob[3]);
-    }
-  }
-  if (v.empty()) {
+  filling = shown();
+  filled = 0;
+  if (filling.empty()) {
     lv_obj_t* l = label(list, "", &lv_font_montserrat_14, t.dim);
     lv_obj_set_width(l, LV_PCT(100));
     lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
@@ -190,6 +217,11 @@ static void fillList() {
                            : catalog::hub.empty() ? "Nothing yet: tap " LV_SYMBOL_REFRESH " to get the list."
                                                   : "None for that machine yet.");
     }
+    return;
+  }
+  fillMore(0);  // (the first rows now: the page looks alive)
+  if (!filling.empty()) {
+    fillTimer = lv_timer_create(fillMore, 16, 0);
   }
 }
 
@@ -348,7 +380,7 @@ void ui::firmwarePage(lv_obj_t* page) {
     }
     for (int i = 0; i < 2; i++) {
       lv_obj_t* dd = lv_dropdown_create(opts);
-      lv_dropdown_set_options(dd, i ? "Popular\nNewest\nA-Z" : o.c_str());
+      lv_dropdown_set_options(dd, i ? "Newest\nA-Z" : o.c_str());
       lv_dropdown_set_selected(dd, i ? sortBy : at);
       lv_obj_set_height(dd, 30);
       lv_obj_set_flex_grow(dd, 1);
@@ -361,6 +393,7 @@ void ui::firmwarePage(lv_obj_t* page) {
     machineMenu(opts);
   }
   list = scroller(page);
+  lv_obj_add_event_cb(list, [](lv_event_t*) { stopFill(); }, LV_EVENT_DELETE, 0);  // (half-built: the page went)
   status = line(page, "", &lv_font_montserrat_12, t.dim);
   lv_obj_set_width(status, LV_PCT(100));
 
@@ -475,12 +508,6 @@ static void detailPage(lv_obj_t* page) {
   }
 
   std::string facts;
-  if (sel.stars) {
-    facts += std::to_string(sel.stars) + " stars   ";
-  }
-  if (sel.installs) {
-    facts += std::to_string(sel.installs) + " installs   ";
-  }
   facts += kb(sel.size) + "   " + (sel.product.empty() ? "not a firmware package" : sel.product);
   lv_obj_t* f = label(body, facts.c_str(), &lv_font_montserrat_12, t.dim);
   lv_label_set_long_mode(f, LV_LABEL_LONG_WRAP);

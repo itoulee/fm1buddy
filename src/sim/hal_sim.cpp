@@ -29,6 +29,10 @@ void hal::logRam(const char*) {}
 
 void hal::psramFirst(bool) {}
 
+void hal::idle() {
+  std::this_thread::yield();
+}
+
 void hal::usbRestart() {}
 
 void hal::touchCal(const TouchCal*) {}

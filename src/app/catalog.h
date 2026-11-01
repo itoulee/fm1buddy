@@ -1,5 +1,5 @@
-// The firmwares: the FM-1 Firmware Hub's list (thefirmwarehub.com/catalog.json, kept on the SD card) and the
-// .fwsc files in the SD card's /fm1 folder
+// The firmwares: mutant.cloud's list (mutant.cloud/catalog.json: the FM-1, SMK-37 and MKE-P37, kept on the SD card)
+// and the .fwsc files in the SD card's /fm1 folder
 #pragma once
 
 #include <stdint.h>
@@ -7,26 +7,21 @@
 #include <string>
 #include <vector>
 
-#define HUB_SITE "https://thefirmwarehub.com/"
+#define HUB_SITE "https://mutant.cloud/"
 #define FW_DIR "/fm1"
 #define DATA_DIR "/fm1buddy"
 #define HUB_CACHE DATA_DIR "/hub.json"
 #define HUB_ETAG DATA_DIR "/hub.etag"
-// the SMK-37's firmwares: the Hub doesn't host their packages, so fm1buddy's site lists them where their makers keep
-// them (tools/smk37.py), each pkg a whole URL
-#define SMK_LIST "https://konsumer.js.org/fm1buddy/smk37.json"  // (the site's own domain: github.io sends it there over http)
-#define SMK_CACHE DATA_DIR "/smk37.json"
-#define SMK_ETAG DATA_DIR "/smk37.etag"
 #define INSTALLS_DIR DATA_DIR "/installs"  // a record of each install
 
 struct Firmware {
   std::string name, author, version, date, what;
-  std::string pkg;      // on the Hub: "fw/zp12-2.4.4.fwsc" (or a whole URL: the SMK-37's)
+  std::string pkg;      // a whole URL: the maker's own file ("https://github.com/.../zp12-2.4.4.fwsc")
   std::string file;     // its file name: "zp12-2.4.4.fwsc"
   std::string product;  // the device it's for: "FM-1_974", "SMK-37 Elite_961"
   std::string sha256;
   std::vector<std::string> kinds;  // "synth", "groove", "drums", ...
-  uint32_t size = 0, stars = 0, installs = 0;
+  uint32_t size = 0;
   bool beta = false, stock = false, keyboard = false, mouse = false;
   bool onSd = false;  // a Hub firmware that is in /fm1 too
   bool hub = false;   // on the SD card: its details came from the Hub's list

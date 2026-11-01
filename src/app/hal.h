@@ -17,6 +17,8 @@ void logRam(const char* what);
 // on: small blocks too go to the PSRAM first (only big ones do otherwise), while something big is made of many small
 // ones and kept (the Hub's list: its JSON, and 100+ firmwares' strings), so it doesn't take the internal RAM Wi-Fi needs
 void psramFirst(bool on);
+// let the other tasks run (the idle task, which the board's watchdog watches) while a big list is read and made
+void idle();
 
 // the SD card's root, for fopen and opendir ("/sdcard"), or 0 without a card
 const char* sd();

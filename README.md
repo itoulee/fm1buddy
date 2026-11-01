@@ -4,8 +4,8 @@
 
 All without a computer/phone/etc:
 
-- Switch the M-VAVE FM-1's firmware, on the fly (from the SD card, or the [FM-1 Firmware Hub](https://thefirmwarehub.com) and download over Wi-Fi, from [the firmware hub](https://thefirmwarehub.com/))
-- Switch the M-VAVE SMK-37's firmware too (Pro, Elite, MKE-P37: the FM-1's chip in a keyboard), from the SD card or over Wi-Fi from [the SMK-37 ports](https://thefirmwarehub.com/smk37/) (the list: `tools/smk37.py`, on this project's site), and back to M-VAVE's stock firmware
+- Switch the M-VAVE FM-1's firmware, on the fly (from the SD card, or over Wi-Fi from [mutant.cloud](https://mutant.cloud/))
+- Switch the M-VAVE SMK-37's firmware too (Pro, Elite, MKE-P37: the FM-1's chip in a keyboard), from the SD card or over Wi-Fi from [mutant.cloud](https://mutant.cloud/?device=smk37), and back to M-VAVE's stock firmware
 - Play it from cheap USB-only (up to 4, on a hub) and Bluetooth MIDI devices, even if FM-1 firmware only supports USB MIDI
 - touchscreen
 - nice themed menus

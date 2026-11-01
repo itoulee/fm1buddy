@@ -8,9 +8,9 @@ sd=${FM1_SD:-sim/sd}
 mkdir -p "$sd/fm1"
 pkg=$(ls "$sd/fm1" | grep -i '\.fwsc$' | head -1 || true)
 if [ -z "$pkg" ]; then
-  url=$(curl -fsS https://thefirmwarehub.com/catalog.json | python3 -I -c '
+  url=$(curl -fsS https://mutant.cloud/catalog.json | python3 -I -c '
 import json, sys
-print("https://thefirmwarehub.com/" + json.load(sys.stdin)["stock"]["pkg"])')
+print(json.load(sys.stdin)["stock"]["pkg"])')
   pkg=$(basename "$url")
   curl -fsS -o "$sd/fm1/$pkg" "$url"
 fi

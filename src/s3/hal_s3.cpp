@@ -125,6 +125,10 @@ void hal::psramFirst(bool on) {
   heap_caps_malloc_extmem_enable(on ? 0 : CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL);  // (as the Arduino core has it)
 }
 
+void hal::idle() {
+  delay(1);  // (a tick: the idle task's, which the watchdog watches)
+}
+
 void hal::logRam(const char* what) {
   hal::log("ram: %s: %u KB internal free (biggest %u KB), %u KB PSRAM", what,
            (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
@@ -477,6 +481,9 @@ int hal::get(const char* url, const char* path, std::string* etag, void (*progre
   c.crt_bundle_attach = esp_crt_bundle_attach;
   c.timeout_ms = 15000;
   c.buffer_size = 4096;
+  // GitHub's release downloads redirect to a signed URL of ~4 KB, which goes in the request line: the default
+  // write buffer (512) can't hold it, so following the redirect fails ("Out of buffer")
+  c.buffer_size_tx = 8192;
   c.user_agent = "fm1buddy";
   esp_http_client_handle_t h = esp_http_client_init(&c);
   if (etag && !etag->empty()) {
@@ -492,7 +499,11 @@ int hal::get(const char* url, const char* path, std::string* etag, void (*progre
     int64_t len = esp_http_client_fetch_headers(h);
     status = esp_http_client_get_status_code(h);
     if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
-      esp_http_client_set_redirection(h);
+      if (esp_http_client_set_redirection(h) != ESP_OK) {
+        err = "The server's redirect didn't fit: too much of it to read.";
+        status = -1;
+        break;
+      }
       esp_http_client_close(h);
       status = -1;
       continue;

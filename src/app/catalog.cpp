@@ -96,8 +96,6 @@ static void readEntry(JsonObjectConst e, Firmware& f) {
   f.product = e["product"] | "";
   f.sha256 = e["sha256"] | "";
   f.size = e["size"] | 0;
-  f.stars = e["stars"] | 0;
-  f.installs = e["installs"] | 0;
   f.beta = e["beta"] | false;
   f.stock = e["stock"] | false;
   f.keyboard = e["hid"]["keyboard"] | false;
@@ -123,31 +121,49 @@ bool catalog::parseHub(std::vector<Firmware>& out, std::string& updated, std::st
 }
 
 static void readFirmwares(JsonArrayConst list, std::vector<Firmware>& out) {
+  size_t i = 0;
   for (JsonObjectConst e : list) {
+    if (!(i++ & 15)) {
+      hal::idle();  // (the list is long: let the board's idle task run)
+    }
     Firmware f;
     readEntry(e, f);
-    if (!f.pkg.empty() && f.size && f.sha256.size() == 64 && f.pkg.find("..") == std::string::npos &&
-        !f.file.empty() && f.file.find("..") == std::string::npos) {
+    if (f.stock) {
+      f.kinds = {"stock"};  // M-VAVE's own, whatever the list's tags say
+    }
+    if (f.pkg.compare(0, 8, "https://") == 0 && f.size && f.sha256.size() == 64 &&
+        f.pkg.find("..") == std::string::npos && !f.file.empty() && f.file.find("..") == std::string::npos) {
       out.push_back(f);
     }
   }
 }
 
-// the SMK-37's list (SMK_LIST), after the Hub's: its packages, if it's on the SD card
-static void readSmk(const JsonDocument& filter, std::vector<Firmware>& out) {
-  std::string text;
-  if (!readAll(catalog::path(SMK_CACHE), text)) {
-    return;
+// the list is 400+ KB: read in 16 KB steps, so the board's idle task (which its watchdog watches) runs now and then
+struct PacedText {
+  const char* p;
+  size_t n, i = 0, since = 0;
+  void pace(size_t k) {
+    if ((since += k) < 0x4000) {
+      return;
+    }
+    since = 0;
+    hal::idle();
   }
-  JsonDocument doc;
-  DeserializationError bad = deserializeJson(doc, text, DeserializationOption::Filter(filter));
-  text = std::string();
-  if (bad) {
-    hal::log("catalog: the SMK-37's list didn't read (%s)", bad.c_str());
-    return;
+  int read() {
+    if (i >= n) {
+      return -1;
+    }
+    pace(1);
+    return (uint8_t)p[i++];
   }
-  readFirmwares(doc["firmwares"], out);
-}
+  size_t readBytes(char* b, size_t len) {
+    size_t k = n - i < len ? n - i : len;
+    memcpy(b, p + i, k);
+    i += k;
+    pace(k);
+    return k;
+  }
+};
 
 static bool parseHubIn(std::vector<Firmware>& out, std::string& updated, std::string& err) {
   std::string text;
@@ -158,14 +174,15 @@ static bool parseHubIn(std::vector<Firmware>& out, std::string& updated, std::st
   JsonDocument filter;
   filter["updated"] = true;
   for (const char* k : {"name", "author", "version", "date", "what", "pkg", "file", "product", "sha256", "size",
-                        "stars", "installs", "beta", "stock", "hid", "kind"}) {
+                        "beta", "stock", "hid", "kind"}) {
     filter["firmwares"][0][k] = true;
   }
   for (const char* k : {"pkg", "product", "sha256", "size"}) {
     filter["stock"][k] = true;
   }
   JsonDocument doc;
-  DeserializationError bad = deserializeJson(doc, text, DeserializationOption::Filter(filter));
+  PacedText in{text.data(), text.size()};
+  DeserializationError bad = deserializeJson(doc, in, DeserializationOption::Filter(filter));
   text = std::string();
   if (bad) {
     err = std::string("The Hub's list didn't read (") + bad.c_str() + ").";
@@ -185,11 +202,11 @@ static bool parseHubIn(std::vector<Firmware>& out, std::string& updated, std::st
     f.what = "The firmware the FM-1 came with: put it back to how it was.";
     f.kinds = {"stock"};
     f.stock = true;
-    out.push_back(f);
+    if (f.pkg.compare(0, 8, "https://") == 0 && f.size && f.sha256.size() == 64) {
+      out.push_back(f);
+    }
   }
   readFirmwares(doc["firmwares"], out);
-  doc.clear();
-  readSmk(filter, out);
   return true;
 }
 

@@ -165,17 +165,6 @@ static void hubJob(void*) {
       fclose(f);
     }
   }
-  // the SMK-37's list (fm1buddy's site): without it the Hub's is still fine
-  std::string smkEtagPath = catalog::path(SMK_ETAG), smkCache = catalog::path(SMK_CACHE), smkError;
-  std::string smkEtag = stat(smkCache.c_str(), &st) ? "" : readText(smkEtagPath);
-  int smk = hal::get(SMK_LIST, smkCache.c_str(), &smkEtag, progress, smkError);
-  hal::log("job: the SMK-37's list: HTTP %d %s", smk, smkError.c_str());
-  if (smk == 200) {
-    if (FILE* f = fopen(smkEtagPath.c_str(), "w")) {
-      fputs(smkEtag.c_str(), f);
-      fclose(f);
-    }
-  }
   step = READING;
   bool ok = catalog::parseHub(hub, hubUpdated, error);
   hal::logRam("the list read");
@@ -195,12 +184,12 @@ static bool fetch() {
   step = FETCHING;
   std::string p = catalog::path(std::string(FW_DIR "/") + target.file);
   hal::log("job: getting %s", target.pkg.c_str());
-  std::string url = target.pkg.compare(0, 8, "https://") ? HUB_SITE + target.pkg : target.pkg;  // (the SMK-37's: whole)
+  std::string url = target.pkg;  // (a whole URL: the maker's own file)
   int code = hal::get(url.c_str(), p.c_str(), 0, progress, error);
   hal::log("job: HTTP %d", code);
   if (code != 200) {
     if (code > 0) {
-      error = (url.compare(0, sizeof HUB_SITE - 1, HUB_SITE) ? "The server said " : "The Hub said ") + std::to_string(code) + ".";
+      error = "The server said " + std::to_string(code) + ".";
     }
     return false;
   }

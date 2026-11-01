@@ -456,7 +456,7 @@ static void aboutPage(lv_obj_t* page) {
   }
   fact(body, "Firmwares", std::to_string(catalog::sd.size()) + " in /fm1");
   fact(body, "Hub list", catalog::hub.empty() ? "not yet" : std::to_string(catalog::hub.size()) + ", from " + catalog::hubUpdated);
-  fact(body, "Hub", "thefirmwarehub.com");
+  fact(body, "Hub", "mutant.cloud");
 }
 
 // ------------------------------------------------------------------------------------------ start on ---
