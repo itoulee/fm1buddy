@@ -1,14 +1,16 @@
-# The installer page (site/) on GitHub Pages, with the latest release's firmware next to it (site/fw/).
-# Settings -> Pages -> Source: GitHub Actions. It runs when site/ changes, after every build (so a new release
-# shows up), and by hand.
+# The installer page (site/) on GitHub Pages, with the latest release's firmware next to it (site/fw/), and the
+# SMK-37's firmware list (smk37.json: tools/smk37.py). Settings -> Pages -> Source: GitHub Actions. It runs when site/
+# changes, after every build (so a new release shows up), every day (for the SMK-37's list), and by hand.
 name: pages
 on:
   push:
     branches: [main]
-    paths: ['site/**', '.github/workflows/pages.yml']
+    paths: ['site/**', 'tools/smk37.py', '.github/workflows/pages.yml']
   workflow_run:
     workflows: [build]
     types: [completed]
+  schedule:
+    - cron: '17 6 * * *'
   workflow_dispatch:
 permissions:
   contents: read
@@ -52,6 +54,14 @@ jobs:
             rm -f site/fw/*
             echo "no release with firmware yet: the page says so"
           fi
+      - name: the SMK-37's firmware list
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          # (if it can't be made today, the one already up stays)
+          python3 -I tools/smk37.py site/smk37.json ||
+            curl -fsSL -o site/smk37.json "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/smk37.json" ||
+            echo "no SMK-37 list"
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

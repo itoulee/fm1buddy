@@ -99,7 +99,7 @@ static void sent() {
   if (jobs::kind != jobs::SEND) {
     return;
   }
-  toast(jobs::ok ? "Sent." : jobs::error.c_str(), !jobs::ok);
+  toast(jobs::ok ? "Sent." : devText(jobs::error).c_str(), !jobs::ok);
   sure = false;
   go(syxPage);
 }
@@ -118,7 +118,7 @@ static void sendTapped(lv_event_t* e) {
 
 static void syxTick() {
   if (jobs::running && status) {
-    lv_label_set_text(status, jobs::status().c_str());
+    lv_label_set_text(status, devText(jobs::status()).c_str());
   }
 }
 
@@ -157,7 +157,7 @@ void ui::syxPage(lv_obj_t* page) {
   lv_obj_t* row = box(body, LV_FLEX_FLOW_ROW);
   lv_obj_set_style_pad_top(row, 6, 0);
   if (jobs::running) {
-    status = label(row, jobs::status().c_str(), &lv_font_montserrat_14, t.accent);
+    status = label(row, devText(jobs::status()).c_str(), &lv_font_montserrat_14, t.accent);
   } else {
     status = 0;
     std::string to = there ? std::string("Send to ") + v.name : "Nothing to send it to";
@@ -181,9 +181,9 @@ void ui::syxPage(lv_obj_t* page) {
 // -------------------------------------------------------------------------------------- a setup ---
 static void loaded() {
   if (jobs::kind == jobs::RESTORE) {
-    toast(jobs::ok ? "Loaded: it's saved on it." : jobs::error.c_str(), !jobs::ok);
+    toast(jobs::ok ? "Loaded: it's saved on it." : devText(jobs::error).c_str(), !jobs::ok);
   } else if (jobs::kind == jobs::EXPORT) {
-    toast(jobs::ok ? (jobs::saved + ".").c_str() : jobs::error.c_str(), !jobs::ok);
+    toast(jobs::ok ? (jobs::saved + ".").c_str() : devText(jobs::error).c_str(), !jobs::ok);
   } else {
     return;
   }
@@ -236,7 +236,7 @@ void ui::setupPage(lv_obj_t* page) {
   lv_obj_t* row = box(body, LV_FLEX_FLOW_ROW);
   lv_obj_set_style_pad_top(row, 6, 0);
   if (jobs::running) {
-    status = label(row, jobs::status().c_str(), &lv_font_montserrat_14, t.accent);
+    status = label(row, devText(jobs::status()).c_str(), &lv_font_montserrat_14, t.accent);
   } else {
     status = 0;
     lv_obj_set_style_pad_column(row, 6, 0);
@@ -248,11 +248,11 @@ void ui::setupPage(lv_obj_t* page) {
     }
   }
   lv_obj_t* l = label(body,
-                      what.kits.empty() ? "It replaces the song on the FM-1, and saves it there. Stop it playing first."
-                      : what.wavs       ? "It makes its kits from the .wav files in " KITS_DIR
-                                          "/, then replaces the "
-                                          "kits and the song on the FM-1. Stop it playing first."
-                                        : "It replaces the kits and the song on the FM-1. Stop it playing first.",
+                      what.kits.empty() ? devText("It replaces the song on the FM-1, and saves it there. Stop it playing first.").c_str()
+                      : what.wavs       ? devText("It makes its kits from the .wav files in " KITS_DIR
+                                                  "/, then replaces the kits and the song on the FM-1. Stop it playing first.")
+                                              .c_str()
+                                        : devText("It replaces the kits and the song on the FM-1. Stop it playing first.").c_str(),
                       &lv_font_montserrat_12, t.dim);
   lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
   lv_obj_set_width(l, LV_PCT(100));
@@ -329,9 +329,9 @@ static void soundsDone() {
   if (jobs::kind == jobs::PROBE) {
     soundsProbed();
   } else if (jobs::kind == jobs::VOICE) {
-    toast(jobs::ok ? ("Saved as " SYX_DIR "/" + jobs::saved + ".").c_str() : jobs::error.c_str(), !jobs::ok);
+    toast(jobs::ok ? ("Saved as " SYX_DIR "/" + jobs::saved + ".").c_str() : devText(jobs::error).c_str(), !jobs::ok);
   } else if (jobs::kind == jobs::KEEP) {
-    toast(jobs::ok ? ("Saved as " SETUPS_DIR "/" + jobs::saved + ".").c_str() : jobs::error.c_str(), !jobs::ok);
+    toast(jobs::ok ? ("Saved as " SETUPS_DIR "/" + jobs::saved + ".").c_str() : devText(jobs::error).c_str(), !jobs::ok);
   }
   go(soundsPage);
 }
@@ -342,7 +342,7 @@ static void soundsTick() {
     return;
   }
   if (status) {
-    lv_label_set_text(status, jobs::running ? jobs::status().c_str() : "");
+    lv_label_set_text(status, jobs::running ? devText(jobs::status()).c_str() : "");
     lv_obj_update_flag(status, LV_OBJ_FLAG_HIDDEN, !jobs::running);
   }
   if (recording && recLabel) {
@@ -393,8 +393,9 @@ void ui::soundsPage(lv_obj_t* page) {
   }
   if (!n) {
     lv_obj_t* l = label(body,
-                        "Nothing on the hub. Plug in the FM-1: its sounds can be recorded to the SD card, and "
-                        ".syx files on the card (in " SYX_DIR ") sent to it.",
+                        devText("Nothing on the hub. Plug in the FM-1: its sounds can be recorded to the SD card, and "
+                                ".syx files on the card (in " SYX_DIR ") sent to it.")
+                            .c_str(),
                         &lv_font_montserrat_14, t.dim);
     lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(l, LV_PCT(100));
@@ -412,7 +413,7 @@ void ui::soundsPage(lv_obj_t* page) {
     bool asked = probedSerial == devSerial;
     asking = false;
     if (!fm1::candidate(dev)) {
-      label(chips, "Not an FM-1: SysEx only", &lv_font_montserrat_12, t.dim);
+      label(chips, devText("Not an FM-1: SysEx only").c_str(), &lv_font_montserrat_12, t.dim);
     } else if (!asked) {
       if (!jobs::running && !fm1::busy) {
         jobs::probe(dev);
@@ -455,10 +456,12 @@ void ui::soundsPage(lv_obj_t* page) {
     } else if (asked && fm1::candidate(dev)) {
       const char* hint = speaks.sloop     ? "Backups, projects and sample slots need SLOOP 2.3 or later: update it from "
                                             "Firmware (the Hub has it)."
-                         : speaks.felucca ? "SLOOP (on the Hub) adds backups and projects you can load from here. "
-                                            "Settings > Back up the FM-1 saves all of its flash with any firmware."
+                         : speaks.felucca ? devText(
+                                                "SLOOP (on the Hub) adds backups and projects you can load from here. "
+                                                "Settings > Back up the FM-1 saves all of its flash with any firmware.")
+                                                .c_str()
                          : speaks.share   ? 0
-                                          : "Settings > Back up the FM-1 saves all of its flash, with any firmware.";
+                                          : devText("Settings > Back up the FM-1 saves all of its flash, with any firmware.").c_str();
       if (hint) {
         lv_obj_t* l = label(body, hint, &lv_font_montserrat_12, t.dim);
         lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
@@ -488,7 +491,7 @@ void ui::soundsPage(lv_obj_t* page) {
     recLabel = label(body, about, &lv_font_montserrat_12, recording ? t.accent : t.dim);
     lv_label_set_long_mode(recLabel, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(recLabel, LV_PCT(100));
-    status = label(body, jobs::running ? jobs::status().c_str() : "", &lv_font_montserrat_12, t.accent);
+    status = label(body, jobs::running ? devText(jobs::status()).c_str() : "", &lv_font_montserrat_12, t.accent);
     lv_obj_update_flag(status, LV_OBJ_FLAG_HIDDEN, !jobs::running);
   }
 

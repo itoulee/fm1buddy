@@ -165,6 +165,17 @@ static void hubJob(void*) {
       fclose(f);
     }
   }
+  // the SMK-37's list (fm1buddy's site): without it the Hub's is still fine
+  std::string smkEtagPath = catalog::path(SMK_ETAG), smkCache = catalog::path(SMK_CACHE), smkError;
+  std::string smkEtag = stat(smkCache.c_str(), &st) ? "" : readText(smkEtagPath);
+  int smk = hal::get(SMK_LIST, smkCache.c_str(), &smkEtag, progress, smkError);
+  hal::log("job: the SMK-37's list: HTTP %d %s", smk, smkError.c_str());
+  if (smk == 200) {
+    if (FILE* f = fopen(smkEtagPath.c_str(), "w")) {
+      fputs(smkEtag.c_str(), f);
+      fclose(f);
+    }
+  }
   step = READING;
   bool ok = catalog::parseHub(hub, hubUpdated, error);
   hal::logRam("the list read");
@@ -184,11 +195,12 @@ static bool fetch() {
   step = FETCHING;
   std::string p = catalog::path(std::string(FW_DIR "/") + target.file);
   hal::log("job: getting %s", target.pkg.c_str());
-  int code = hal::get((HUB_SITE + target.pkg).c_str(), p.c_str(), 0, progress, error);
+  std::string url = target.pkg.compare(0, 8, "https://") ? HUB_SITE + target.pkg : target.pkg;  // (the SMK-37's: whole)
+  int code = hal::get(url.c_str(), p.c_str(), 0, progress, error);
   hal::log("job: HTTP %d", code);
   if (code != 200) {
     if (code > 0) {
-      error = "The Hub said " + std::to_string(code) + ".";
+      error = (url.compare(0, sizeof HUB_SITE - 1, HUB_SITE) ? "The server said " : "The Hub said ") + std::to_string(code) + ".";
     }
     return false;
   }
@@ -415,11 +427,13 @@ static bool saveBackup(const std::vector<uint8_t>& a, const uboot::Chip& chip, c
   std::string dir = catalog::path(BACKUPS_DIR);
   mkdir(dir.c_str(), 0777);
   struct stat st;
+  bool smk = uboot::smkFlash(a);
+  std::string base = dir + (smk ? "/smk-" : "/fm1-");  // (an SMK-37's has its calibration: uboot.h)
   int n = 1;
-  while (n < 1000 && !stat((dir + "/fm1-" + std::to_string(n) + ".bin").c_str(), &st)) {
+  while (n < 1000 && !stat((base + std::to_string(n) + ".bin").c_str(), &st)) {
     n++;
   }
-  saved = "fm1-" + std::to_string(n) + ".bin";
+  saved = (smk ? "smk-" : "fm1-") + std::to_string(n) + ".bin";
   char sha[65] = "";
   hal::sha256(a.data(), a.size(), sha);
   FILE* f = fopen((dir + "/" + saved).c_str(), "wb");
@@ -436,10 +450,11 @@ static bool saveBackup(const std::vector<uint8_t>& a, const uboot::Chip& chip, c
     uboot::keepAlive();
   }
   if (ok) {
-    f = fopen((dir + "/fm1-" + std::to_string(n) + ".txt").c_str(), "w");
+    f = fopen((base + std::to_string(n) + ".txt").c_str(), "w");
     ok = f && fprintf(f,
-                      "fm1buddy backup: all of the FM-1's flash, through its boot loader\n"
-                      "firmware %s\nchip key %04X\nflash    %06X, %u bytes\nsha256   %s\n",
+                      smk ? "fm1buddy backup: all of the SMK-37's flash, through its boot loader\n"
+                          : "fm1buddy backup: all of the FM-1's flash, through its boot loader\n"
+                            "firmware %s\nchip key %04X\nflash    %06X, %u bytes\nsha256   %s\n",
                       was.empty() ? "?" : was.c_str(), chip.key, (unsigned)chip.flashId, (unsigned)chip.size, sha) > 0;
     ok &= f && !fclose(f);
   }
@@ -538,8 +553,9 @@ std::string jobs::recovering() {
   return recoverFrom;
 }
 
-// what goes on it, as the flash would be from 0 (its first WRITE_FROM bytes aren't written): 0 or an error
-static const char* image(const std::string& from, std::vector<uint8_t>& out) {
+// what goes on it, as the flash would be from 0 (its first WRITE_FROM bytes aren't written), and if it's for an
+// SMK-37: 0 or an error
+static const char* image(const std::string& from, std::vector<uint8_t>& out, bool& smk) {
   std::string p = catalog::path(from);
   if (isBackup(from)) {
     FILE* f = fopen(p.c_str(), "rb");
@@ -551,9 +567,10 @@ static const char* image(const std::string& from, std::vector<uint8_t>& out) {
     int more = fgetc(f);
     fclose(f);
     if (n != out.size() || more != EOF) {
-      return "That backup isn't all of an FM-1's flash (1 MB).";
+      return "That backup isn't all of a flash (1 MB).";
     }
-    out.resize(WRITE_TO);  // (its key_mac stays as the FM-1 has it)
+    smk = uboot::smkFlash(out);
+    out.resize(WRITE_TO);  // (its key_mac stays as the chip has it)
     return 0;
   }
   Pkg pkg;
@@ -564,11 +581,12 @@ static const char* image(const std::string& from, std::vector<uint8_t>& out) {
   if (!pkg.flash(at, n)) {
     return "That package has no flash image in it (or it's damaged).";
   }
-  if (strncmp(pkg.product, "FM-1_", 5)) {
-    return "That package isn't for the FM-1.";
+  smk = isSmk(pkg.product);
+  if (strncmp(pkg.product, "FM-1_", 5) && !smk) {
+    return "That package isn't for the FM-1 or the SMK-37.";
   }
-  if (n <= WRITE_FROM || n > WRITE_TO) {
-    return "Its flash image is a size the FM-1's isn't.";
+  if (n <= WRITE_FROM || n > (smk ? SMK_CAL : WRITE_TO)) {
+    return "Its flash image is a size no firmware's is.";
   }
   out.assign(pkg.image + at, pkg.image + at + n);
   return 0;
@@ -577,9 +595,10 @@ static const char* image(const std::string& from, std::vector<uint8_t>& out) {
 static void recoverJob(void*) {
   std::string from = recovering();
   std::vector<uint8_t> want, now, back;
+  bool forSmk = false;
   step = GETTING_READY;
   const char* e = !hal::sd() ? "No SD card." : from.empty() ? "Nothing was chosen to go on it."
-                                                            : image(from, want);
+                                                            : image(from, want, forSmk);
   if (e) {
     error = e;
     return finish(false);
@@ -614,10 +633,25 @@ static void recoverJob(void*) {
     step = SAVING;
     e = saveBackup(now, chip, "before recovery", true) ? 0 : error.c_str();
   }
+  // an FM-1 and an SMK-37 look the same to here: what's on its flash says which it is. The SMK-37's calibration is
+  // its own (never written), so a backup goes back only on the keyboard it came from
+  bool smk = !e && uboot::smkFlash(now);
+  if (!e) {
+    hal::log("recover: it's %s, the image is for %s", smk ? "an SMK-37" : "an FM-1", forSmk ? "an SMK-37" : "an FM-1");
+    if (smk != forSmk) {
+      e = smk ? "This is an SMK-37, and that's for the FM-1: nothing was written."
+              : "This is an FM-1, and that's for the SMK-37: nothing was written.";
+    } else if (smk && want.size() > SMK_CAL && memcmp(&want[SMK_CAL], &now[SMK_CAL], SECTOR)) {
+      e = "That backup is from another SMK-37 (its calibration differs): nothing was written.";
+    }
+  }
   std::vector<uint32_t> sectors;
   std::vector<uint8_t> expect = now;
   if (!e) {
     std::copy(want.begin() + WRITE_FROM, want.end(), expect.begin() + WRITE_FROM);
+    if (smk) {
+      std::copy(now.begin() + SMK_CAL, now.begin() + SMK_CAL + SECTOR, expect.begin() + SMK_CAL);  // (never written)
+    }
     for (uint32_t a = WRITE_FROM; a < want.size(); a += SECTOR) {
       if (memcmp(&expect[a], &now[a], SECTOR)) {
         sectors.push_back(a);

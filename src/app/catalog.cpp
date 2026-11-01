@@ -10,6 +10,7 @@
 
 #include <algorithm>
 
+#include "fm1.h"
 #include "hal.h"
 
 std::vector<Firmware> catalog::hub, catalog::sd;
@@ -91,13 +92,14 @@ static void readEntry(JsonObjectConst e, Firmware& f) {
   f.date = e["date"] | "";
   f.what = ascii(e["what"] | "");
   f.pkg = e["pkg"] | "";
-  f.file = baseName(f.pkg);
+  f.file = baseName(e["file"] | f.pkg.c_str());
   f.product = e["product"] | "";
   f.sha256 = e["sha256"] | "";
   f.size = e["size"] | 0;
   f.stars = e["stars"] | 0;
   f.installs = e["installs"] | 0;
   f.beta = e["beta"] | false;
+  f.stock = e["stock"] | false;
   f.keyboard = e["hid"]["keyboard"] | false;
   f.mouse = e["hid"]["mouse"] | false;
   JsonVariantConst k = e["kind"];
@@ -120,6 +122,33 @@ bool catalog::parseHub(std::vector<Firmware>& out, std::string& updated, std::st
   return ok;
 }
 
+static void readFirmwares(JsonArrayConst list, std::vector<Firmware>& out) {
+  for (JsonObjectConst e : list) {
+    Firmware f;
+    readEntry(e, f);
+    if (!f.pkg.empty() && f.size && f.sha256.size() == 64 && f.pkg.find("..") == std::string::npos &&
+        !f.file.empty() && f.file.find("..") == std::string::npos) {
+      out.push_back(f);
+    }
+  }
+}
+
+// the SMK-37's list (SMK_LIST), after the Hub's: its packages, if it's on the SD card
+static void readSmk(const JsonDocument& filter, std::vector<Firmware>& out) {
+  std::string text;
+  if (!readAll(catalog::path(SMK_CACHE), text)) {
+    return;
+  }
+  JsonDocument doc;
+  DeserializationError bad = deserializeJson(doc, text, DeserializationOption::Filter(filter));
+  text = std::string();
+  if (bad) {
+    hal::log("catalog: the SMK-37's list didn't read (%s)", bad.c_str());
+    return;
+  }
+  readFirmwares(doc["firmwares"], out);
+}
+
 static bool parseHubIn(std::vector<Firmware>& out, std::string& updated, std::string& err) {
   std::string text;
   if (!readAll(catalog::path(HUB_CACHE), text)) {
@@ -128,8 +157,8 @@ static bool parseHubIn(std::vector<Firmware>& out, std::string& updated, std::st
   }
   JsonDocument filter;
   filter["updated"] = true;
-  for (const char* k : {"name", "author", "version", "date", "what", "pkg", "product", "sha256", "size", "stars",
-                        "installs", "beta", "hid", "kind"}) {
+  for (const char* k : {"name", "author", "version", "date", "what", "pkg", "file", "product", "sha256", "size",
+                        "stars", "installs", "beta", "stock", "hid", "kind"}) {
     filter["firmwares"][0][k] = true;
   }
   for (const char* k : {"pkg", "product", "sha256", "size"}) {
@@ -158,38 +187,23 @@ static bool parseHubIn(std::vector<Firmware>& out, std::string& updated, std::st
     f.stock = true;
     out.push_back(f);
   }
-  for (JsonObjectConst e : doc["firmwares"].as<JsonArrayConst>()) {
-    Firmware f;
-    readEntry(e, f);
-    if (!f.pkg.empty() && f.size && f.sha256.size() == 64 && f.pkg.find("..") == std::string::npos) {
-      out.push_back(f);
-    }
-  }
+  readFirmwares(doc["firmwares"], out);
+  doc.clear();
+  readSmk(filter, out);
   return true;
 }
 
 std::string catalog::product(const char* p) {
-  // one marker byte after each of the first 20 blocks of 0x30: the device it's for
-  const int BLOCKS = 20, BLK = 0x30, KEEP = 0x2F;
-  uint8_t head[BLOCKS * BLK];
+  std::vector<uint8_t> head(64 * 0x30);  // the most interleave blocks a package has (fm1.cpp)
   FILE* f = fopen(p, "rb");
   if (!f) {
     return "";
   }
-  bool ok = fread(head, 1, sizeof head, f) == sizeof head;
+  uint32_t n = fread(head.data(), 1, head.size(), f);
   fclose(f);
-  std::string s;
-  for (int i = 0; ok && i < BLOCKS; i++) {
-    uint8_t m = head[i * BLK + KEEP];
-    if (m != 0x7D) {
-      char c = (char)((m - i - 1) & 0xFF);
-      if (c < 0x20 || c > 0x7E) {
-        return "";
-      }
-      s += c;
-    }
-  }
-  return s;
+  char s[24];
+  uint32_t blocks;
+  return pkgHead(head.data(), n, s, sizeof s, blocks) ? s : "";
 }
 
 // M-VAVE's own releases, by their sha256: known on the SD card whatever they're called, and whatever the Hub lists

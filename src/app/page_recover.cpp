@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include "catalog.h"
+#include "fm1.h"
 #include "hal.h"
 #include "jobs.h"
 #include "uboot.h"
@@ -53,7 +54,7 @@ static void recoverTick() {
     return;
   }
   if (status && jobs::running) {
-    lv_label_set_text(status, jobs::status().c_str());
+    lv_label_set_text(status, devText(jobs::status()).c_str());
   }
 }
 
@@ -71,14 +72,14 @@ void ui::recoverPage(lv_obj_t* page) {
       name = f.name;
     }
   }
-  header(page, LV_SYMBOL_WARNING "  Recovering the FM-1");
+  header(page, devText(LV_SYMBOL_WARNING "  Recovering the FM-1").c_str());
   lv_obj_t* body = scroller(page);
   lv_obj_set_style_pad_row(body, 6, 0);
   wrapped(body, ("Putting " + name + " on it.").c_str(), &lv_font_montserrat_12, t.dim);
   bool waiting = jobs::running && (jobs::step == jobs::GETTING_READY || jobs::step == jobs::KEYING);
   if (jobs::running) {
     // one step at a time: off, on, then it runs
-    status = wrapped(body, jobs::status().c_str(), &lv_font_montserrat_20, t.accent);
+    status = wrapped(body, devText(jobs::status()).c_str(), &lv_font_montserrat_20, t.accent);
     if (waiting && hal::keyState() < hal::KEY_ANSWERED) {
       wrapped(body,
               "It has to start from no power at all: only then does its chip listen. Plug it straight into fm1buddy's "
@@ -89,13 +90,13 @@ void ui::recoverPage(lv_obj_t* page) {
     }
   } else if (mine && jobs::ok) {
     status = 0;
-    wrapped(body, jobs::error.empty() ? "Done: it's on the FM-1." : jobs::error.c_str(), &lv_font_montserrat_16,
+    wrapped(body, jobs::error.empty() ? devText("Done: it's on the FM-1.").c_str() : devText(jobs::error).c_str(), &lv_font_montserrat_16,
             t.accent);
-    wrapped(body, "Switch the FM-1 off and on: it starts what was written. Then plug the hub back in, and tap Done.",
+    wrapped(body, devText("Switch the FM-1 off and on: it starts what was written. Then plug the hub back in, and tap Done.").c_str(),
             &lv_font_montserrat_14, t.text);
   } else {
     status = 0;
-    wrapped(body, mine ? jobs::error.c_str() : "Busy: try again.", &lv_font_montserrat_14, t.knob[0]);
+    wrapped(body, mine ? devText(jobs::error).c_str() : "Busy: try again.", &lv_font_montserrat_14, t.knob[0]);
   }
   if (!jobs::saved.empty() && mine) {
     wrapped(body, ("Its flash as it was: " BACKUPS_DIR "/" + jobs::saved + ".").c_str(), &lv_font_montserrat_12,
@@ -188,7 +189,7 @@ static void startTapped(lv_event_t*) {
 
 static void prepared() {
   if (jobs::kind == jobs::PREPARE && !jobs::ok) {
-    toast(jobs::error.c_str(), true);
+    toast(devText(jobs::error).c_str(), true);
   }
   go(hal::recoveryMode() ? recoverPage : recoverStartPage);  // (the board restarts into it: the simulator doesn't)
 }
@@ -197,25 +198,26 @@ static lv_obj_t* prepStatus;
 
 static void startTick() {
   if (prepStatus) {
-    lv_label_set_text(prepStatus, jobs::running ? jobs::status().c_str() : "");
+    lv_label_set_text(prepStatus, jobs::running ? devText(jobs::status()).c_str() : "");
   }
 }
 
 void ui::recoverStartPage(lv_obj_t* page) {
   const Theme& t = theme();
-  header(page, "Recover the FM-1", settingsPage);
+  header(page, devText("Recover the FM-1").c_str(), settingsPage);
   lv_obj_t* body = scroller(page);
   lv_obj_set_style_pad_row(body, 4, 0);
-  wrapped(body, "For an FM-1 that doesn't start: a firmware or a backup goes back on it, through its chip's own boot loader.",
+  wrapped(body, devText("For an FM-1 that doesn't start: a firmware or a backup goes back on it, through its chip's own boot loader.").c_str(),
           &lv_font_montserrat_12, t.dim);
 
   label(body, "Put on it", &lv_font_montserrat_14, t.text);
   choices.clear();
   for (const Firmware& f : catalog::sd) {
-    if (!strncmp(f.product.c_str(), "FM-1_", 5)) {
-      choices.push_back({FW_DIR "/" + f.file, f.name.empty() ? f.file : f.name,
-                         f.stock ? "stock" : f.version.empty() ? "firmware"
-                                                               : f.version});
+    bool smk = isSmk(f.product.c_str());  // (it says what it's for: recovery checks the flash it finds)
+    if (!strncmp(f.product.c_str(), "FM-1_", 5) || smk) {
+      std::string v = f.stock ? "stock" : f.version.empty() ? "firmware"
+                                                            : f.version;
+      choices.push_back({FW_DIR "/" + f.file, f.name.empty() ? f.file : f.name, smk ? v + ", SMK-37" : v});
     }
   }
   backups(choices);
@@ -245,7 +247,7 @@ void ui::recoverStartPage(lv_obj_t* page) {
   lv_obj_set_style_pad_top(row, 6, 0);
   startBtn = button(row, LV_SYMBOL_PLAY " Start", startTapped);
   showChosen();
-  prepStatus = label(body, jobs::running ? jobs::status().c_str() : "", &lv_font_montserrat_14, t.accent);
+  prepStatus = label(body, jobs::running ? devText(jobs::status()).c_str() : "", &lv_font_montserrat_14, t.accent);
   wrapped(body, "fm1buddy restarts for it, then shows what to do, step by step.", &lv_font_montserrat_12, t.dim);
   tick = startTick;
   jobDone = prepared;

@@ -7,6 +7,7 @@
 
 #include "board.h"
 #include "hal.h"
+#include "jobs.h"
 #include "midi.h"
 #include "record.h"
 #include "ui.h"
@@ -179,7 +180,7 @@ void setup() {
 }
 
 // the serial console (tools/s3.py): "shot" sends the screen (SHOT w h, then w*h RGB565 pixels, little-endian),
-// "tap x y" touches it for a moment, "drag x1 y1 x2 y2" slides a finger across it, "log" prints the SD card's log, "cat path" / "ls path" a file or folder on it, "host [script]" restarts as the USB host for 40 s (and runs script: board.h), "crash" crashes (the next start logs it), "usbmidi" restarts as USB MIDI for the
+// "tap x y" touches it for a moment, "drag x1 y1 x2 y2" slides a finger across it, "log" prints the SD card's log, "cat path" / "ls path" a file or folder on it, "host [script]" restarts as the USB host for 40 s (and runs script: board.h), "crash" crashes (the next start logs it), "disk" restarts as a USB disk (back once the computer ejects it), "usbmidi" restarts as USB MIDI for the
 // computer (until it sends the SysEx that brings the serial port back: computer_s3.cpp)
 static void console() {
   static char line[160];
@@ -206,6 +207,12 @@ static void console() {
       board::hostTestStart(line[4] ? line + 5 : "");
     } else if (!strcmp(line, "crash")) {
       abort();  // (to test the crash report: hal_s3.cpp logCrash)
+    } else if (!strcmp(line, "disk")) {
+      if (hal::sd() && !jobs::running) {
+        hal::diskModeSet(true);  // (restarts as a USB disk for this computer, and back once it's ejected)
+      } else {
+        Serial.println(hal::sd() ? "BUSY" : "NOSD");
+      }
     } else if (!strcmp(line, "usbmidi")) {
       hal::computerMidiSet(true);  // (restarts as USB MIDI for this computer)
     } else if (!strcmp(line, "shot")) {

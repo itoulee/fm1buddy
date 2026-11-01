@@ -24,14 +24,14 @@ static void backedUp() {
   if (jobs::kind != jobs::BACKUP) {
     return;
   }
-  toast(jobs::ok ? ("Saved as " BACKUPS_DIR "/" + jobs::saved + ".").c_str() : jobs::error.c_str(), !jobs::ok);
+  toast(jobs::ok ? ("Saved as " BACKUPS_DIR "/" + jobs::saved + ".").c_str() : devText(jobs::error).c_str(), !jobs::ok);
   go(backupPage);
 }
 
 static void backupTapped(lv_event_t*) {
   int d = fm1::current();
   if (d < 0) {
-    toast("No FM-1 on the hub.", true);
+    toast(devText("No FM-1 on the hub.").c_str(), true);
   } else if (!jobs::backup(d)) {
     toast("Busy: try again in a moment.", true);
   }
@@ -40,7 +40,7 @@ static void backupTapped(lv_event_t*) {
 
 static void backupTick() {
   if (status) {
-    lv_label_set_text(status, jobs::running ? jobs::status().c_str() : "");
+    lv_label_set_text(status, jobs::running ? devText(jobs::status()).c_str() : "");
     lv_obj_update_flag(status, LV_OBJ_FLAG_HIDDEN, !jobs::running);
   }
   if (!jobs::running && midi::seq != shownSeq) {
@@ -72,7 +72,7 @@ static lv_obj_t* wrapped(lv_obj_t* body, const char* text, uint32_t color) {
 
 void ui::backupPage(lv_obj_t* page) {
   const Theme& t = theme();
-  header(page, "Back up the FM-1", settingsPage);
+  header(page, devText("Back up the FM-1").c_str(), settingsPage);
   lv_obj_t* body = scroller(page);
   lv_obj_set_style_pad_row(body, 4, 0);
   shownSeq = midi::seq;
@@ -91,13 +91,13 @@ void ui::backupPage(lv_obj_t* page) {
   if (jobs::running || d < 0 || others) {
     lv_obj_add_state(b, LV_STATE_DISABLED);
   }
-  status = label(body, jobs::running ? jobs::status().c_str() : "", &lv_font_montserrat_14, t.accent);
+  status = label(body, jobs::running ? devText(jobs::status()).c_str() : "", &lv_font_montserrat_14, t.accent);
   lv_obj_update_flag(status, LV_OBJ_FLAG_HIDDEN, !jobs::running);
   if (!jobs::running) {
-    std::string what = d < 0    ? "No FM-1 on the hub."
-                       : others ? "Unplug the other USB devices: the FM-1 has to be alone on the hub."
-                       : id     ? std::string("The FM-1 runs ") + id->text + "."
-                                : "The FM-1 is there.";
+    std::string what = d < 0    ? devText("No FM-1 on the hub.")
+                       : others ? devText("Unplug the other USB devices: the FM-1 has to be alone on the hub.")
+                       : id     ? devText("The FM-1 runs ") + id->text + "."
+                                : devText("The FM-1 is there.");
     wrapped(body, what.c_str(), d < 0 || others ? t.knob[0] : t.dim);
   }
 

@@ -3,6 +3,8 @@
 
 #include <lvgl.h>
 
+#include <string>
+
 #include "settings.h"
 #include "sounds.h"
 #include "themes.h"
@@ -39,6 +41,9 @@ extern void (*tick)();
 extern void (*jobDone)();
 // a message at the bottom for a moment (bad: in red)
 void toast(const char* text, bool bad = false);
+// text about the device, for the one there: "FM-1" as a word becomes "SMK" when it's an SMK-37 (fm1::machineName).
+// Names and ids are left as they are ("FM-1_015", "ota-FM-1", "baudgirl-FM-1+VA")
+std::string devText(const std::string& text);
 // the theme changed: everything again, on the same page
 void rebuild();
 

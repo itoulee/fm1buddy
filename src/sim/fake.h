@@ -11,6 +11,8 @@ void begin(bool fm1, bool keys, bool faults, bool fomajam = false);
 void sloopMode(bool on);
 // or plain Felucca: the same protocol, its 3 sample slots and no backups
 void feluccaMode(bool on);
+// or an SMK-37 Elite (the FM-1's chip in a keyboard) on its stock firmware
+void smkMode(bool on);
 // the keyboard sends MIDI clock too, at 100 BPM (to follow)
 void keysClock(bool on);
 // the FM-1 sends a DX7 bank (as from its menu)

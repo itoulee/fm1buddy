@@ -51,6 +51,11 @@ void keepAlive();
 #define WRITE_TO 0xFF000u
 #define FM1_KEY 0x980F
 #define FM1_FLASH 0x856014u
+// The SMK-37 (the FM-1's chip in a keyboard) looks the same here, but its flash has its factory calibration (keys,
+// pads, wheels) in the sector at SMK_CAL, "trimdat" at SMK_MARK: unique to each keyboard, and never written
+#define SMK_CAL 0xC1000u
+#define SMK_MARK 0xC1224u
+bool smkFlash(const std::vector<uint8_t>& flash);  // (a whole flash, or a backup of one)
 // one sector: erased, written, and read back; 0 or an error
 const char* writeSector(uint32_t addr, const uint8_t* data);
 // back to its firmware (it restarts)

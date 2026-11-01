@@ -216,9 +216,10 @@ void ui::playPage(lv_obj_t* page) {
   // chords
   pickRow(body, LV_SYMBOL_LIST "  Chords", play::CHORD_NAMES, play::CHORDS, s.chord, CHORD);
   wrapped(body,
-          s.arp ? "Each key plays the chord, and the arpeggiator plays its notes. The FM-1's own notes are left as "
-                  "they are."
-                : "Each key plays a chord. The FM-1's own notes are left as they are.",
+          s.arp ? devText("Each key plays the chord, and the arpeggiator plays its notes. The FM-1's own notes are left as "
+                          "they are.")
+                      .c_str()
+                : devText("Each key plays a chord. The FM-1's own notes are left as they are.").c_str(),
           t.dim);
 
   shownBeat = play::beat();

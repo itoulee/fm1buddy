@@ -158,8 +158,9 @@ void ui::recordPage(lv_obj_t* page) {
 
   if (!there) {
     wrapped(body,
-            "No USB audio on the hub. The FM-1 sends its sound over USB with Felucca and the firmwares built on it, "
-            "such as SLOOP. A class-compliant USB microphone or sound card works too.",
+            devText("No USB audio on the hub. The FM-1 sends its sound over USB with Felucca and the firmwares built on it, "
+                    "such as SLOOP. A class-compliant USB microphone or sound card works too.")
+                .c_str(),
             t.dim);
   } else {
     midi::Dev v;
@@ -181,7 +182,7 @@ void ui::recordPage(lv_obj_t* page) {
       lv_obj_set_flex_grow(bars[c], 1);
       shown[c] = 0;
     }
-    clipLabel = label(body, LV_SYMBOL_WARNING " It clipped: turn the FM-1 down (its USB level follows MASTER)",
+    clipLabel = label(body, devText(LV_SYMBOL_WARNING " It clipped: turn the FM-1 down (its USB level follows MASTER)").c_str(),
                       &lv_font_montserrat_12, warn());
     lv_obj_add_flag(clipLabel, LV_OBJ_FLAG_HIDDEN);
     clipAt = 0;

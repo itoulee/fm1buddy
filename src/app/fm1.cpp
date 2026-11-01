@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -32,9 +33,109 @@ bool Fm1Id::ota() const {
 }
 
 // ------------------------------------------------------------------------------------- the package ---
-#define BLOCKS 20
+#define BLOCKS 20      // identity blocks: one marker byte after each says who the package is for
+#define MAX_BLOCKS 64  // (more may follow, see blockCount)
 #define BLK 0x30
 #define KEEP 0x2F
+
+static void enc(uint8_t* p, uint32_t n);
+static uint16_t crc16(const uint8_t* p, uint32_t n);
+
+static bool idChar(uint8_t m, uint32_t i) {
+  uint8_t c = (m - i - 1) & 0xFF;
+  return c >= 0x20 && c < 0x7F;
+}
+
+// block k's marker, or -1 past the end
+static int marker(const uint8_t* raw, uint32_t n, uint32_t k) {
+  return (k + 1) * BLK <= n ? raw[k * BLK + KEEP] : -1;
+}
+
+// the identity blocks: 20, or more when the identity is longer (the Starrykey 37 Play's "STARRYKEY-37 PLAY_016" takes
+// 21). Those past 20 count only when unused (0x7D) markers follow them, as in the SMK-37's stock packages
+static uint32_t idBlocks(const uint8_t* raw, uint32_t n) {
+  uint32_t k = BLOCKS;
+  for (int m; k < MAX_BLOCKS && (m = marker(raw, n, k)) >= 0 && m != 0x7D && idChar(m, k);) {
+    k++;
+  }
+  return k > BLOCKS && marker(raw, n, k) == 0x7D ? k : BLOCKS;
+}
+
+// the interleave blocks: the identity blocks, then more while the marker is the unused 0x7D (the SMK-37 Pro's stock
+// v016: 36). A 20-block package can have 0x7D there by chance: Pkg::open checks the CRCs and goes back to 20
+static uint32_t blockCount(const uint8_t* raw, uint32_t n) {
+  uint32_t k = idBlocks(raw, n);
+  while (k < MAX_BLOCKS && marker(raw, n, k) == 0x7D) {
+    k++;
+  }
+  return k;
+}
+
+static bool idText(const uint8_t* raw, uint32_t ids, char* out, uint32_t max) {
+  uint32_t k = 0;
+  for (uint32_t i = 0; i < ids; i++) {
+    uint8_t m = raw[i * BLK + KEEP];
+    if (m == 0x7D) {
+      continue;
+    }
+    if (!idChar(m, i) || k + 1 >= max) {
+      return false;
+    }
+    out[k++] = (char)((m - i - 1) & 0xFF);
+  }
+  out[k] = 0;
+  return k > 0;
+}
+
+bool pkgHead(const uint8_t* raw, uint32_t n, char* product, uint32_t max, uint32_t& blocks) {
+  if (n < BLOCKS * BLK) {
+    return false;
+  }
+  blocks = blockCount(raw, n);
+  return idText(raw, idBlocks(raw, n), product, max);
+}
+
+// the logical image (what the device reads): the package without its markers
+static void logical(const uint8_t* raw, uint32_t n, uint32_t blocks, uint8_t* out) {
+  for (uint32_t i = 0; i < blocks; i++) {
+    memcpy(out + i * KEEP, raw + i * BLK, KEEP);
+  }
+  memcpy(out + blocks * KEEP, raw + blocks * BLK, n - blocks * BLK);
+}
+
+static uint16_t le16(const uint8_t* p) {
+  return p[0] | p[1] << 8;
+}
+
+static uint32_t le32(const uint8_t* p) {
+  return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+// the image is whole: its header, its file list and the CRCs of what the device installs (flash.bin, ota.bin; the
+// stock packer's other files carry a CRC of something else: only their bounds)
+static bool intact(const uint8_t* img, uint32_t size) {
+  uint8_t h[0x40];
+  if (size < sizeof h) {
+    return false;
+  }
+  memcpy(h, img, sizeof h);
+  enc(h, sizeof h);
+  uint32_t count = le16(h + 8);
+  if (crc16(h + 2, 0x3E) != le16(h) || count < 1 || count > 8 || size < 0x40 + 0x50 * count ||
+      crc16(img + 0x40, 0x50 * count) != le16(h + 2)) {
+    return false;
+  }
+  for (uint32_t i = 0; i < count; i++) {
+    uint8_t e[0x50];
+    memcpy(e, img + 0x40 + i * 0x50, sizeof e);
+    enc(e, sizeof e);
+    uint32_t type = le16(e), off = le32(e + 8), len = le32(e + 12);
+    if (off > size || len > size - off || ((type == 0 || type == 100) && crc16(img + off, len) != le16(e + 4))) {
+      return false;
+    }
+  }
+  return true;
+}
 
 // the whole file into memory, read twice (the second time just for its sha256): a card that reads differently
 // each time is found before the FM-1 is touched
@@ -50,44 +151,47 @@ const char* Pkg::open(const char* p) {
   fseek(f, 0, SEEK_SET);
   if (n < BLOCKS * BLK || n > 16 * 1024 * 1024) {
     fclose(f);
-    return "That isn't an FM-1 package.";
+    return "That isn't a firmware package.";
   }
-  image = (uint8_t*)malloc(n);  // big blocks go to the PSRAM
-  if (!image) {
+  uint8_t* raw = (uint8_t*)malloc(n);  // big blocks go to the PSRAM
+  if (!raw) {
     fclose(f);
     return "Not enough memory for the package.";
   }
-  bool got = fread(image, 1, n, f) == (size_t)n;
+  bool got = fread(raw, 1, n, f) == (size_t)n;
   fclose(f);
   if (!got) {
-    close();
+    free(raw);
     return "The SD card didn't read the whole file.";
   }
   fileSize = n;
   char again[65];
-  if (!hal::sha256(image, n, sha256) || !hal::sha256(p, again) || strcmp(sha256, again)) {
-    close();
+  if (!hal::sha256(raw, n, sha256) || !hal::sha256(p, again) || strcmp(sha256, again)) {
+    free(raw);
     return "The SD card read the file differently twice: try another card.";
   }
-  // the identity: one marker byte after each of the first 20 blocks
-  uint32_t k = 0;
-  for (int i = 0; i < BLOCKS; i++) {
-    uint8_t m = image[i * BLK + KEEP];
-    if (m != 0x7D && k < sizeof product - 1) {
-      product[k++] = (char)((m - i - 1) & 0xFF);
+  uint32_t blocks;
+  if (!pkgHead(raw, n, product, sizeof product, blocks)) {
+    free(raw);
+    return "That isn't a firmware package.";
+  }
+  image = (uint8_t*)malloc(n - BLOCKS);
+  if (!image) {
+    free(raw);
+    return "Not enough memory for the package.";
+  }
+  logical(raw, n, blocks, image);
+  if (blocks != BLOCKS && !intact(image, n - blocks)) {  // the 0x7D markers were by chance?
+    logical(raw, n, BLOCKS, image);
+    if (intact(image, n - BLOCKS)) {
+      blocks = BLOCKS;
+      idText(raw, BLOCKS, product, sizeof product);
+    } else {
+      logical(raw, n, blocks, image);
     }
   }
-  product[k] = 0;
-  if (!k) {
-    close();
-    return "That isn't an FM-1 package.";
-  }
-  // the logical image: the first 20 blocks lose their last byte
-  for (int i = 1; i < BLOCKS; i++) {
-    memmove(image + i * KEEP, image + i * BLK, KEEP);
-  }
-  memmove(image + BLOCKS * KEEP, image + BLOCKS * BLK, n - BLOCKS * BLK);
-  size = n - BLOCKS;
+  free(raw);
+  size = n - blocks;
   return 0;
 }
 
@@ -98,9 +202,28 @@ void Pkg::close() {
 }
 
 bool Pkg::fits(const Fm1Id& id) const {
-  const char* us = strchr(product, '_');
-  size_t n = us ? us - product : strlen(product);
-  return strlen(id.model) == n && !strncmp(id.model, product, n);
+  return sameHardware(id.model, product);
+}
+
+// "ota-SMK-37 Elite_016" -> "SMK-37 Elite"
+static std::string modelOf(const char* s) {
+  if (!strncasecmp(s, "ota-", 4)) {
+    s += 4;
+  }
+  const char* us = strrchr(s, '_');
+  return std::string(s, us ? us - s : strlen(s));
+}
+
+bool isSmk(const char* model) {
+  std::string m = modelOf(model);
+  for (char& c : m) {
+    c = toupper(c);
+  }
+  return !m.compare(0, 7, "SMK-37 ") || !m.compare(0, 7, "SMK-37+") || m == "MKE-P37" || !m.compare(0, 12, "STARRYKEY-37");
+}
+
+bool sameHardware(const char* a, const char* b) {
+  return !strcasecmp(modelOf(a).c_str(), modelOf(b).c_str()) || (isSmk(a) && isSmk(b));
 }
 
 // JieLi's ENC stream cipher (in place), and CRC-16/XMODEM: as fomajam's tools/fm1pkg_make.py makes packages
@@ -332,9 +455,9 @@ static void wait(uint32_t ms) {
   std::this_thread::sleep_for(std::chrono::milliseconds(ms));
 }
 
-// the device can be an FM-1: by its USB name (never probe other gear)
+// the device can be an FM-1 (or an SMK-37): by its USB name (never probe other gear)
 static bool candidateDev(const midi::Dev& v) {
-  static const char* NAMES[] = {"fm-1", "felucca", "ota", "composite", "sinco", "usb-midi"};
+  static const char* NAMES[] = {"fm-1", "felucca", "ota", "composite", "sinco", "usb-midi", "smk-37", "mke-p37", "starrykey"};
   char lower[sizeof v.name];
   uint32_t i = 0;
   for (; v.name[i]; i++) {
@@ -462,6 +585,19 @@ int fm1::current() {
     }
   }
   return -1;
+}
+
+const char* fm1::machineName() {
+  static int8_t smk = -1;  // the last one seen (-1: not loaded yet)
+  if (smk < 0 && !hal::load("machine", &smk, 1)) {
+    smk = 0;
+  }
+  const Fm1Id* id = known(current());
+  if (id && isSmk(id->model) != (bool)smk) {
+    smk = isSmk(id->model);
+    hal::save("machine", &smk, 1);
+  }
+  return smk ? "SMK" : "FM-1";
 }
 
 // ------------------------------------------------------------------------------------------- record ---

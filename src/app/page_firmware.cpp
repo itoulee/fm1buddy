@@ -25,10 +25,20 @@ static Source source = SD;
 static bool sourceChosen, hubAsked;
 static int sortBy = POPULAR;
 static std::string kindFilter;  // "": all
-static Firmware sel;            // the one the details show
+// the machines a firmware can be for (an SMK-37 package says which model), and which the lists show: the Hub's, the
+// one on the hub until another is picked (-1); the SD card's, all (-1) until one is picked
+enum Machine { FM1,
+               SMK_PRO,
+               SMK_ELITE,
+               MKE_P37,
+               MACHINES };
+static const char* MACHINE_NAMES[MACHINES] = {"FM-1", "SMK Pro", "SMK Elite", "MKE-P37"};
+static int hubMachine = -1, sdMachine = -1;
+static Firmware sel;  // the one the details show
 static lv_obj_t *list, *status, *refresh, *spin;
 static lv_obj_t *actions, *progress, *progressText;
 static std::string shownFm1;  // the FM-1 the Install button was made for
+static std::string listFm1;   // ... and the one the list was made for
 
 static void detailPage(lv_obj_t* page);
 
@@ -55,9 +65,46 @@ static std::string kb(uint32_t size) {
 }
 
 // ------------------------------------------------------------------------------------------- the list ---
+// "FM-1_015", "ota-FM-1_900", or ""
+static std::string fm1Now() {
+  const Fm1Id* id = fm1::known(fm1::current());
+  return id ? id->text : "";
+}
+
+// what a package (or a device: "ota-SMK-37 Elite_900") is for; -1: not a package
+static int machineOf(const std::string& product) {
+  if (product.empty()) {
+    return -1;
+  }
+  if (!isSmk(product.c_str())) {
+    return FM1;
+  }
+  std::string m = product.compare(0, 4, "ota-") ? product : product.substr(4);
+  return !m.compare(0, 13, "SMK-37 Elite_") ? SMK_ELITE : !m.compare(0, 8, "MKE-P37_") ? MKE_P37
+                                                                                       : SMK_PRO;  // (the
+  // Starrykey 37 Play takes the Pro's)
+}
+
+// the Hub's list: the machine picked, or the one on the hub (the FM-1 without one)
+static int hubShows() {
+  if (hubMachine >= 0) {
+    return hubMachine;
+  }
+  const Fm1Id* id = fm1::known(fm1::current());
+  int m = id ? machineOf(id->text) : -1;
+  return m < 0 ? FM1 : m;
+}
+
+static bool forDevice(const Firmware& f) {
+  return machineOf(f.product) == hubShows();
+}
+
 static std::vector<const Firmware*> shown() {
   std::vector<const Firmware*> v;
   for (const Firmware& f : source == SD ? catalog::sd : catalog::hub) {
+    if (source == HUB ? !forDevice(f) : sdMachine >= 0 && machineOf(f.product) != sdMachine) {
+      continue;
+    }
     if (source == SD || kindFilter.empty() || std::find(f.kinds.begin(), f.kinds.end(), kindFilter) != f.kinds.end()) {
       v.push_back(&f);
     }
@@ -100,7 +147,7 @@ static void fillList() {
       sub += (sub.empty() ? "v" : "  v") + f->version;
     }
     if (sub.empty()) {
-      sub = f->product.empty() ? "not an FM-1 package" : f->product;
+      sub = f->product.empty() ? "not a firmware package" : f->product;
     }
     lv_obj_t* s = line(left, sub.c_str(), &lv_font_montserrat_12, t.dim);
     lv_obj_set_width(s, LV_PCT(100));
@@ -108,13 +155,20 @@ static void fillList() {
     lv_obj_t* right = box(r);
     lv_obj_set_width(right, LV_SIZE_CONTENT);
     lv_obj_set_flex_align(right, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-    if (f->beta) {
-      label(right, "beta", &lv_font_montserrat_12, t.knob[1]);
-    } else if (source == HUB && f->onSd) {
-      label(right, LV_SYMBOL_SD_CARD, &lv_font_montserrat_12, t.accent);
-    }
     if (!f->kinds.empty()) {
       label(right, f->kinds[0].c_str(), &lv_font_montserrat_12, kindColor(f->kinds[0]));
+    }
+    lv_obj_t* tags = box(right, LV_FLEX_FLOW_ROW);
+    lv_obj_set_width(tags, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_column(tags, 4, 0);
+    if (f->beta) {
+      label(tags, "beta", &lv_font_montserrat_12, t.knob[1]);
+    } else if (source == HUB && f->onSd) {
+      label(tags, LV_SYMBOL_SD_CARD, &lv_font_montserrat_12, t.accent);
+    }
+    int m = machineOf(f->product);
+    if (m >= 0) {
+      label(tags, MACHINE_NAMES[m], &lv_font_montserrat_12, m == FM1 ? t.dim : t.knob[3]);
     }
   }
   if (v.empty()) {
@@ -122,7 +176,9 @@ static void fillList() {
     lv_obj_set_width(l, LV_PCT(100));
     lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_pad_all(l, 12, 0);
-    if (source == SD) {
+    if (source == SD && hal::sd() && !catalog::sd.empty()) {
+      lv_label_set_text(l, "None for that machine on the SD card.");
+    } else if (source == SD) {
       lv_label_set_text(l, hal::sd() ? "No firmwares in /fm1 on the SD card. Save some from the Hub, or copy .fwsc files there."
                                      : "No SD card.");
     } else if (!settings.ssid[0]) {
@@ -130,13 +186,20 @@ static void fillList() {
       lv_obj_t* b = button(list, LV_SYMBOL_WIFI "  Wi-Fi settings", wifiSettings);
       lv_obj_set_style_margin_left(b, 12, 0);
     } else if (!jobs::running) {
-      lv_label_set_text(l, kindFilter.empty() ? "Nothing yet: tap " LV_SYMBOL_REFRESH " to get the list." : "None of that kind.");
+      lv_label_set_text(l, !kindFilter.empty()    ? "None of that kind."
+                           : catalog::hub.empty() ? "Nothing yet: tap " LV_SYMBOL_REFRESH " to get the list."
+                                                  : "None for that machine yet.");
     }
   }
 }
 
 static void showStatus() {
   if (!status) {
+    return;
+  }
+  if (!jobs::running && fm1Now() != listFm1) {
+    hubMachine = -1;
+    go(firmwarePage);  // an FM-1 or an SMK-37 came or went: the Hub's list is for it
     return;
   }
   const Theme& t = theme();
@@ -160,7 +223,7 @@ static void showStatus() {
 static void hubDone() {
   if (jobs::kind == jobs::HUB) {
     if (!jobs::ok) {
-      toast(jobs::error.c_str(), true);
+      toast(devText(jobs::error).c_str(), true);
     }
     go(firmwarePage);
   }
@@ -187,6 +250,40 @@ static void pickKind(lv_event_t* e) {
   fillList();
 }
 
+static void pickMachine(lv_event_t* e) {
+  int i = lv_dropdown_get_selected((lv_obj_t*)lv_event_get_target(e));
+  if (source == HUB) {
+    hubMachine = i;
+    go(firmwarePage);  // (its kinds and count are the machine's)
+  } else {
+    sdMachine = i - 1;  // ("All" first)
+    fillList();
+  }
+}
+
+// three to a row: small text
+static void menuStyle(lv_obj_t* dd) {
+  lv_obj_set_style_pad_ver(dd, 7, 0);
+  lv_obj_set_style_pad_left(dd, 8, 0);
+  lv_obj_set_style_pad_right(dd, 6, 0);
+  lv_obj_set_style_text_font(dd, &lv_font_montserrat_12, 0);
+}
+
+static lv_obj_t* machineMenu(lv_obj_t* row) {
+  std::string o = source == SD ? "All" : "";
+  for (int i = 0; i < MACHINES; i++) {
+    o += (o.empty() ? "" : "\n") + std::string(MACHINE_NAMES[i]);
+  }
+  lv_obj_t* dd = lv_dropdown_create(row);
+  lv_dropdown_set_options(dd, o.c_str());
+  lv_dropdown_set_selected(dd, source == SD ? sdMachine + 1 : hubShows());
+  lv_obj_set_height(dd, 30);
+  lv_obj_set_flex_grow(dd, 1);
+  menuStyle(dd);
+  lv_obj_add_event_cb(dd, pickMachine, LV_EVENT_VALUE_CHANGED, 0);
+  return dd;
+}
+
 static void pickSort(lv_event_t* e) {
   sortBy = lv_dropdown_get_selected((lv_obj_t*)lv_event_get_target(e));
   fillList();
@@ -198,10 +295,11 @@ void ui::firmwarePage(lv_obj_t* page) {
     source = HUB;
   }
   refresh = spin = 0;
+  listFm1 = fm1Now();
   lv_obj_t* head = header(page, 0);
   lv_obj_set_style_pad_column(head, 4, 0);
   const char* names[] = {"SD card", "Hub"};
-  size_t counts[] = {catalog::sd.size(), catalog::hub.size()};
+  size_t counts[] = {catalog::sd.size(), (size_t)std::count_if(catalog::hub.begin(), catalog::hub.end(), forDevice)};
   for (int i = 0; i < 2; i++) {
     char s[32];
     snprintf(s, sizeof s, counts[i] ? "%s  %u" : "%s", names[i], (unsigned)counts[i]);
@@ -221,11 +319,15 @@ void ui::firmwarePage(lv_obj_t* page) {
     lv_obj_set_style_arc_width(spin, 4, LV_PART_INDICATOR);
     lv_obj_set_style_margin_hor(spin, 7, 0);
 
-    // what kind, and in what order
+    // for what, what kind, and in what order
     lv_obj_t* opts = box(page, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(opts, 4, 0);
+    machineMenu(opts);
     std::vector<std::string> kinds;
     for (const Firmware& f : catalog::hub) {
+      if (!forDevice(f)) {
+        continue;
+      }
       for (const std::string& k : f.kinds) {
         if (std::find(kinds.begin(), kinds.end(), k) == kinds.end()) {
           kinds.push_back(k);
@@ -250,9 +352,13 @@ void ui::firmwarePage(lv_obj_t* page) {
       lv_dropdown_set_selected(dd, i ? sortBy : at);
       lv_obj_set_height(dd, 30);
       lv_obj_set_flex_grow(dd, 1);
-      lv_obj_set_style_pad_ver(dd, 6, 0);
+      menuStyle(dd);
       lv_obj_add_event_cb(dd, i ? pickSort : pickKind, LV_EVENT_VALUE_CHANGED, 0);
     }
+  }
+  if (source == SD && !catalog::sd.empty()) {
+    lv_obj_t* opts = box(page, LV_FLEX_FLOW_ROW);
+    machineMenu(opts);
   }
   list = scroller(page);
   status = line(page, "", &lv_font_montserrat_12, t.dim);
@@ -271,12 +377,6 @@ void ui::firmwarePage(lv_obj_t* page) {
 }
 
 // ------------------------------------------------------------------------------------------ the details ---
-// "FM-1_015", "ota-FM-1_900", or ""
-static std::string fm1Now() {
-  const Fm1Id* id = fm1::known(fm1::current());
-  return id ? id->text : "";
-}
-
 static void showProgress() {
   bool busy = jobs::running && (jobs::kind == jobs::DOWNLOAD || jobs::kind == jobs::INSTALL);
   if (!busy && fm1Now() != shownFm1) {
@@ -288,7 +388,7 @@ static void showProgress() {
   if (busy) {
     uint32_t t = jobs::total, d = jobs::done;
     lv_bar_set_value(lv_obj_get_child(progress, 0), t ? (int32_t)((uint64_t)d * 100 / t) : 0, LV_ANIM_OFF);
-    lv_label_set_text(progressText, jobs::status().c_str());
+    lv_label_set_text(progressText, devText(jobs::status()).c_str());
   }
 }
 
@@ -300,7 +400,7 @@ static void downloaded() {
     toast(jobs::kind == jobs::INSTALL ? "Installed." : "Saved to the SD card.");
     sel.onSd = true;
   } else {
-    toast(jobs::error.c_str(), true);
+    toast(devText(jobs::error).c_str(), true);
   }
   go(detailPage);
 }
@@ -381,7 +481,7 @@ static void detailPage(lv_obj_t* page) {
   if (sel.installs) {
     facts += std::to_string(sel.installs) + " installs   ";
   }
-  facts += kb(sel.size) + "   " + (sel.product.empty() ? "not an FM-1 package" : sel.product);
+  facts += kb(sel.size) + "   " + (sel.product.empty() ? "not a firmware package" : sel.product);
   lv_obj_t* f = label(body, facts.c_str(), &lv_font_montserrat_12, t.dim);
   lv_label_set_long_mode(f, LV_LABEL_LONG_WRAP);
   lv_obj_set_width(f, LV_PCT(100));
@@ -389,11 +489,11 @@ static void detailPage(lv_obj_t* page) {
   // nothing to go back to: a backup first (from stock, it's the only copy of M-VAVE's firmware and the FM-1's
   // settings, projects and samples)
   const Fm1Id* now = fm1::known(fm1::current());
-  if (now && !now->ota() && hal::sd() && !hasBackup()) {
+  if (now && !now->ota() && !isSmk(now->model) && hal::sd() && !hasBackup()) {  // (backups: the FM-1 only, so far)
     lv_obj_t* br = box(body, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(br, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(br, 6, 0);
-    lv_obj_t* bl = label(br, LV_SYMBOL_WARNING " No backup of the FM-1 on the SD card yet: one lets you go back.",
+    lv_obj_t* bl = label(br, devText(LV_SYMBOL_WARNING " No backup of the FM-1 on the SD card yet: one lets you go back.").c_str(),
                          &lv_font_montserrat_12, t.knob[1]);
     lv_label_set_long_mode(bl, LV_LABEL_LONG_WRAP);
     lv_obj_set_flex_grow(bl, 1);
@@ -431,11 +531,12 @@ static void detailPage(lv_obj_t* page) {
   shownFm1 = fm1Now();
   const Fm1Id* id = fm1::known(fm1::current());
   std::string model = sel.product.substr(0, sel.product.find('_'));
-  const char* why = !id                                        ? "Install: no FM-1"
-                    : sel.product.empty()                      ? "Not an FM-1 package"
-                    : !id->ota() && model != id->model         ? "Not for this device"
-                    : source == HUB && !sel.onSd && !hal::sd() ? "Install: no SD card"
-                                                               : 0;
+  bool smk = isSmk(sel.product.c_str());
+  const char* why = !id                                                     ? (smk ? "Install: no SMK" : "Install: no FM-1")
+                    : sel.product.empty()                                   ? "Not a firmware package"
+                    : !id->ota() && !sameHardware(model.c_str(), id->model) ? "Not for this device"
+                    : source == HUB && !sel.onSd && !hal::sd()              ? "Install: no SD card"
+                                                                            : 0;
   lv_obj_t* inst = button(actions, why ? why : id->ota() ? "Finish install"
                                                          : "Install",
                           why ? 0 : install);

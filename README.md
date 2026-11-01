@@ -5,6 +5,7 @@
 All without a computer/phone/etc:
 
 - Switch the M-VAVE FM-1's firmware, on the fly (from the SD card, or the [FM-1 Firmware Hub](https://thefirmwarehub.com) and download over Wi-Fi, from [the firmware hub](https://thefirmwarehub.com/))
+- Switch the M-VAVE SMK-37's firmware too (Pro, Elite, MKE-P37: the FM-1's chip in a keyboard), from the SD card or over Wi-Fi from [the SMK-37 ports](https://thefirmwarehub.com/smk37/) (the list: `tools/smk37.py`, on this project's site), and back to M-VAVE's stock firmware
 - Play it from cheap USB-only (up to 4, on a hub) and Bluetooth MIDI devices, even if FM-1 firmware only supports USB MIDI
 - touchscreen
 - nice themed menus
@@ -24,7 +25,7 @@ All without a computer/phone/etc:
 - Act as USB disk (to manage files on SD)
 - MIDI-out, turn FM1 into a sequencer (on supported firmware, like [fomajam](https://github.com/konsumer/fomajam))
 - FM1 Recover: write a firmware or backup to an FM-1 that won't start, like [FM-1-transporter](https://github.com/kurogedelic/FM-1-transporter) with no wiring needed (when people say "use RP2040")
-- Automation options, great for LLM development: switch it into USB MIDI mode from the serial console (`tools/s3.py usbmidi`), and back with a "magic" SysEx message (`tools/s3.py serial`), so tests can run on the real thing.
+- Automation options, great for LLM development: switch it into USB MIDI mode from the serial console (`tools/s3.py usbmidi`), and back with a "magic" SysEx message (`tools/s3.py serial`), and switch to USB-disk (`tools/s3.py disk`) or eject disk on host to go back to serial. This means tests can run on the real thing.
 
 It should be useful for most firmware, depending on what it supports, but it has some extra stuff that is specific to [fomajam](https://github.com/konsumer/fomajam):
 
@@ -73,7 +74,7 @@ pio run -e sim && .pio/build/sim/program --fm1 --keys
 
 `tools/unit-test.sh` runs the tests of the MIDI mapping's rules and SLOOP's formats (`test/`: a sample slot made from
 .wav files must be the bytes SLOOP's own `tools/sampleio.py` makes). `--sloop` makes the simulator's FM-1 one running
-SLOOP 2.8, `--felucca` one running Felucca 1.6.1 (its 3 sample slots). `--theme NAME` shows it in one of the themes (WHITE, NEON, ...), to check a page in all of them. `--clock` gives the simulator's keyboard
+SLOOP 2.8, `--felucca` one running Felucca 1.6.1 (its 3 sample slots), `--smk` an SMK-37 Elite on its stock firmware. `--theme NAME` shows it in one of the themes (WHITE, NEON, ...), to check a page in all of them. `--clock` gives the simulator's keyboard
 MIDI clock to follow; `press X Y`, `release`, `finger2 X Y` and `lift2` in a script hold fingers down, for the touch
 controller.
 
@@ -86,7 +87,9 @@ last 10 are kept): send one along with a report of an install gone wrong.
 `tools/s3.py` (with `~/.platformio/penv/bin/python`) does the same on the board: `shot FILE`, `tap X Y`, `drag X1 Y1 X2 Y2`, `log` (what it
 logged on the hub, also in `fm1buddy/log.txt` on its SD card), `host` (the USB host for 40 s, running an optional script of `tap X Y` and `wait MS` steps), and `usbmidi` / `serial`
 (it restarts as a USB MIDI device for the computer, and back: `serial` sends it a SysEx of its own,
-`F0 7D 66 6D 31 62 01 F7`, and needs `pip install python-rtmidi`), to test USB MIDI from a script.
+`F0 7D 66 6D 31 62 01 F7`, and needs `pip install python-rtmidi`), to test USB MIDI from a script. `disk` restarts it as a USB disk and prints
+where its SD card is mounted; `eject` ejects it, and it comes back as the serial port by itself, so a script can copy
+packages to it.
 
 ```
 src/app/   the app (LVGL 9): pages, the Hub's list, MIDI between devices, the FM-1's update protocol, sounds (SysEx),

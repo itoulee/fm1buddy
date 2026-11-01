@@ -216,7 +216,7 @@ void ui::midiPage(lv_obj_t* page) {
     lv_obj_set_width(lasts[d], LV_PCT(100));
   }
   if (!n) {
-    const char* msg = hal::usbHost()        ? "Nothing on the hub. Plug in the FM-1 and a controller: whatever one plays, the others hear."
+    const char* msg = hal::usbHost()        ? devText("Nothing on the hub. Plug in the FM-1 and a controller: whatever one plays, the others hear.").c_str()
                       : hal::computerMidi() ? "Waiting for the computer to open fm1buddy's USB MIDI."
                                             : "A computer is on the USB port, as its serial port: USB MIDI devices "
                                               "need the hub (or Settings > On a computer: USB MIDI). Bluetooth MIDI "

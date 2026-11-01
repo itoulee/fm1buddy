@@ -1,10 +1,10 @@
 // The app on the desktop: an SDL window twice the screen's size, the mouse for touch.
 //
-//   program [--headless] [--zoom N] [--theme NAME] [--fm1] [--fomajam] [--sloop] [--faults] [--keys] [--clock] [--install FILE]
+//   program [--headless] [--zoom N] [--theme NAME] [--fm1] [--fomajam] [--sloop] [--smk] [--faults] [--keys] [--clock] [--install FILE]
 //           [--script "tap 24 70; wait 300; shot a.bmp; quit"]
 //
 // --fm1 puts a pretend FM-1 on the hub (it goes through a whole install), --fomajam makes it one running fomajam (it
-// shares its song), --sloop one running SLOOP 2.8 (backups, projects, sample slots), --faults makes it and its USB misbehave, --keys adds a keyboard that plays now and then (--clock:
+// shares its song), --sloop one running SLOOP 2.8 (backups, projects, sample slots), --smk makes it an SMK-37 Elite, --faults makes it and its USB misbehave, --keys adds a keyboard that plays now and then (--clock:
 // and sends MIDI clock at 100 BPM).
 // --install FILE installs /fm1/FILE on the pretend FM-1, again (as a person would) if it doesn't finish, up to 3
 // times, then quits: 0 if it's installed, 1 if not.
@@ -149,6 +149,9 @@ int main(int argc, char** argv) {
     } else if (!strcmp(argv[i], "--sloop")) {
       fm1 = true;
       fake::sloopMode(true);
+    } else if (!strcmp(argv[i], "--smk")) {
+      fm1 = true;
+      fake::smkMode(true);
     } else if (!strcmp(argv[i], "--felucca")) {
       fm1 = true;
       fake::feluccaMode(true);

@@ -83,8 +83,8 @@ void ui::settingsPage(lv_obj_t* page) {
   }
   lv_obj_add_event_cb(sw, hubAuto, LV_EVENT_VALUE_CHANGED, 0);
 
-  menuRow(body, LV_SYMBOL_SAVE "  Back up the FM-1", 0, backupPage);
-  menuRow(body, LV_SYMBOL_WARNING "  Recover the FM-1", 0, recoverStartPage);
+  menuRow(body, devText(LV_SYMBOL_SAVE "  Back up the FM-1").c_str(), 0, backupPage);
+  menuRow(body, devText(LV_SYMBOL_WARNING "  Recover the FM-1").c_str(), 0, recoverStartPage);
   menuRow(body, LV_SYMBOL_USB "  USB disk", 0, diskStartPage);
   menuRow(body, LV_SYMBOL_USB "  On a computer", hal::computerMidi() ? "USB MIDI" : "Serial port", computerPage);
   menuRow(body, LV_SYMBOL_SD_CARD "  About", FM1BUDDY_VERSION, aboutPage);
@@ -94,7 +94,7 @@ void ui::settingsPage(lv_obj_t* page) {
 static void scanned() {
   if (jobs::kind == jobs::SCAN) {
     if (!jobs::ok) {
-      toast(jobs::error.c_str(), true);
+      toast(devText(jobs::error).c_str(), true);
     }
     go(wifiPage);
   }
@@ -177,14 +177,14 @@ static void joined() {
     toast("Joined, and saved.");
     go(wifiPage);
   } else {
-    lv_label_set_text(msg, jobs::error.c_str());
+    lv_label_set_text(msg, devText(jobs::error).c_str());
     lv_obj_set_style_text_color(msg, color(theme().knob[0]), 0);
   }
 }
 
 static void showJoin() {
   if (jobs::running && jobs::kind == jobs::JOIN) {
-    lv_label_set_text(msg, jobs::status().c_str());
+    lv_label_set_text(msg, devText(jobs::status()).c_str());
     lv_obj_set_style_text_color(msg, color(theme().dim), 0);
   }
 }
