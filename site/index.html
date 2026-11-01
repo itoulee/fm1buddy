@@ -75,13 +75,14 @@ FM-1 ───────┘                 │
             <img src="case/s3.png" alt="The case for the CYD-S3" width="450" height="350" loading="lazy" />
             <div>
               <p>Print the base open side up and the lid flat side down, without supports (PLA or PETG). The lid snaps on and holds the board down. The holes in the bottom reach BOOT and RESET, for a paperclip; the SD card goes in at the side.</p>
+              <p class="note">The battery case has room for a flat 500 mAh LiPo (like Adafruit's 1578) under the board, on its <code>BAT</code> socket (1.25 mm, 2 pins: check which side is +), with a hole for a small slide switch in its lead.</p>
               <div class="actions case-links"></div>
             </div>
           </div>
           <h2>What it can't do</h2>
           <ul>
             <li><strong>Up to 4 USB MIDI devices on the hub:</strong> the FM-1 and 3 controllers, say.</li>
-            <li><strong>The hub needs the charger.</strong> The board can't power its USB-C port itself, so the hub and what's on it get their power from the adapter's charging port.</li>
+            <li><strong>The hub needs the charger.</strong> The board can't power its USB-C port itself, so the hub and what's on it get their power from the adapter's charging port. A battery keeps the screen and Bluetooth MIDI going without it, not the hub.</li>
             <li>Bluetooth stops while Wi-Fi is on (they don't both fit in its memory), and starts again after.</li>
           </ul>
         </section>
