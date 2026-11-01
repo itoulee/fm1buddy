@@ -11,6 +11,7 @@
 
 /* [What] */
 battery = false;
+button_holes = false;  // holes in the floor to reach BOOT and RESET with a paperclip
 part = "preview";  // [preview, base, lid]
 section = false;   // preview: cut in half, to see the inside
 
@@ -89,7 +90,7 @@ module pegs(holes, h, d_post, d_peg, peg_h) {
 // --------------------------------------------------------------------------------------------- CYD-S3 ---
 // the board face up on posts (high enough for a battery under it), its USB-C through the x = 0 wall for the OTG
 // adapter. The box is wider than the board across, so the lid's lip clears the display glass (as wide as the
-// board); posts in the lid hold the board down at its holes. Paperclip holes in the floor reach BOOT and RESET
+// board); posts in the lid hold the board down at its holes. Paperclip holes in the floor can reach BOOT and RESET
 s_bz = (battery ? bat.z + 0.7 : 0) + S3_BACK + 0.8;           // the board's underside
 s_inner_h = s_bz + PCB + S3_FRONT + 0.2;
 sc0 = [-gap, -gap - 1.5];
@@ -111,7 +112,7 @@ module s3_base() {
     wall_hole(1, [S3_SD, sc1.y + wall / 2, s_bz - 1.0], 16, 4, 0.8);
     translate([S3_SD, sc1.y - 1, s_bz - 1.0]) rotate([-90, 0, 0]) cylinder(d = 9, h = wall + 2);
     // BOOT and RESET, for a paperclip from underneath
-    for (b = S3_BTN) translate([b.x + 0.4, b.y, -floor_t - 1]) cylinder(d = 2.4, h = floor_t + 2);
+    if (button_holes) for (b = S3_BTN) translate([b.x + 0.4, b.y, -floor_t - 1]) cylinder(d = 2.4, h = floor_t + 2);
     // thin under the RGB LED, so it shows through (a battery covers it)
     if (!battery) translate([S3_LED.x - 4, S3_LED.y - 4, -floor_t + 0.6]) cube([8, 8, floor_t]);
     if (battery && switch_hole.x > 0) wall_hole(1, [18, sc1.y + wall / 2, bat.z / 2 + 0.5], switch_hole.x, switch_hole.y, 0.5);

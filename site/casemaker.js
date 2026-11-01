@@ -1,6 +1,6 @@
 // The case, made for your battery: the case's OpenSCAD file run in the browser (OpenSCAD in WebAssembly), shown in
 // 3D (three.js: drag to turn it) and redrawn as the battery's size changes, and its STLs to download. The file is
-// the one the latest release was made from, copied next to the page by the pages workflow (fw/), or main's.
+// main's, copied next to the page by the pages workflow (fw/), or from GitHub.
 // OpenSCAD and three.js load once the case is on screen
 
 const OPENSCAD = 'https://cdn.jsdelivr.net/npm/openscad-wasm-prebuilt@1.2.0/dist/openscad.js'
@@ -153,6 +153,7 @@ export function init() {
   const $ = (s) => box.querySelector(s)
   const inputs = ['x', 'y', 'z'].map((n) => $(`[name=${n}]`))
   const sw = $('[name=sw]')
+  const btn = $('[name=btn]')
   const status = $('.maker-status')
   const canvas = $('canvas')
   const still = $('.case-view img')
@@ -169,7 +170,7 @@ export function init() {
   // what the case is made with now; or an error (a size that doesn't fit)
   const params = () => {
     if (none) {
-      return { defines: { battery: false }, name: 'fm1buddy-case-s3-base.stl' }
+      return { defines: { battery: false, button_holes: btn.checked }, name: `fm1buddy-case-s3${btn.checked ? '-buttons' : ''}-base.stl` }
     }
     const size = inputs.map((i) => parseFloat(i.value))
     if (size.some((v) => !(v > 0))) {
@@ -180,9 +181,9 @@ export function init() {
       return { error: `That’s too big: a battery up to ${MAX[0] - ROOM[0]} × ${MAX[1] - ROOM[1]} mm fits (any thickness).` }
     }
     return {
-      defines: { battery: true, bat: `[${bat}]`, switch_hole: sw.checked ? '[9, 4.2]' : '[0, 0]' },
+      defines: { battery: true, bat: `[${bat}]`, switch_hole: sw.checked ? '[9, 4.2]' : '[0, 0]', button_holes: btn.checked },
       bat,
-      name: `fm1buddy-case-s3-battery-${size.join('x')}${sw.checked ? '-switch' : ''}-base.stl`
+      name: `fm1buddy-case-s3-battery-${size.join('x')}${sw.checked ? '-switch' : ''}${btn.checked ? '-buttons' : ''}-base.stl`
     }
   }
 
@@ -269,7 +270,7 @@ export function init() {
   for (const b of box.querySelectorAll('.maker-presets button')) {
     b.onclick = () => pick(PRESETS[b.dataset.i])
   }
-  for (const i of [...inputs, sw]) {
+  for (const i of [...inputs, sw, btn]) {
     i.oninput = changed
   }
 

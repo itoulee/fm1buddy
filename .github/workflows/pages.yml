@@ -5,7 +5,7 @@ name: pages
 on:
   push:
     branches: [main]
-    paths: ['site/**', '.github/workflows/pages.yml']
+    paths: ['site/**', 'case/**', '.github/workflows/pages.yml']
   workflow_run:
     workflows: [build]
     types: [completed]
@@ -43,8 +43,6 @@ jobs:
             rm -f site/fw/*
           done
           if [ -n "$tag" ]; then
-            # the case's OpenSCAD file as it was then: the page makes the case's STLs from it (casemaker.js)
-            curl -sfL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$tag/case/fm1buddy-case.scad" -o site/fw/fm1buddy-case.scad || true
             jq -n --arg tag "$tag" '{tag: $tag}' > site/fw/version.json
             jq -n --arg v "$tag" '{name: "fm1buddy", version: $v, new_install_prompt_erase: true,
               builds: [{chipFamily: "ESP32-S3", parts: [{path: "fm1buddy-cyd-s3.bin", offset: 0}]}]}' > site/fw/manifest.json
@@ -52,6 +50,8 @@ jobs:
             rm -f site/fw/*
             echo "no release with firmware yet: the page says so"
           fi
+      - name: the case's OpenSCAD file (the page makes the case's STLs from it, casemaker.js)
+        run: mkdir -p site/fw && cp case/fm1buddy-case.scad site/fw/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
