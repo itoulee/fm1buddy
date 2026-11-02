@@ -629,15 +629,13 @@ static void recoverJob(void*) {
     e = saveBackup(now, chip, "before recovery", true) ? 0 : error.c_str();
   }
   // an FM-1 and an SMK-37 look the same to here: what's on its flash says which it is. The SMK-37's calibration is
-  // its own (never written), so a backup goes back only on the keyboard it came from
+  // its own (never written): another SMK-37's backup goes on it with its own calibration kept
   bool smk = !e && uboot::smkFlash(now);
   if (!e) {
     hal::log("recover: it's %s, the image is for %s", smk ? "an SMK-37" : "an FM-1", forSmk ? "an SMK-37" : "an FM-1");
     if (smk != forSmk) {
       e = smk ? "This is an SMK-37, and that's for the FM-1: nothing was written."
               : "This is an FM-1, and that's for the SMK-37: nothing was written.";
-    } else if (smk && want.size() > SMK_CAL && memcmp(&want[SMK_CAL], &now[SMK_CAL], SECTOR)) {
-      e = "That backup is from another SMK-37 (its calibration differs): nothing was written.";
     }
   }
   std::vector<uint32_t> sectors;
