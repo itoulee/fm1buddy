@@ -23,6 +23,10 @@ std::atomic<int> kind{NONE}, step{IDLE};
 std::atomic<bool> running{false};
 std::atomic<uint32_t> finished{0};
 std::atomic<uint32_t> done{0}, total{0};
+std::atomic<uint8_t> mapKind[MAP_SECTORS], mapMark[MAP_SECTORS], mapCheck[MAP_SECTORS];
+std::atomic<int> mapAt{-1};
+std::atomic<bool> mapChecking{false};
+std::atomic<uint32_t> mapSeq{0};
 bool ok;
 std::string error;
 std::vector<hal::Ap> aps;
@@ -396,6 +400,79 @@ static void restoreJob(void*) {
 // ------------------------------------------------------------------------------------------ backup ---
 static int reading;  // BACKUP: which reading of its flash (it's read twice, and they must be the same)
 
+// ------------------------------------------------------------------------------------ the flash map ---
+// a reading of the flash, into buf: each sector as it comes is put on the map: what's on it (the first reading), or
+// whether it's the same as in ref (a reading again)
+static const std::vector<uint8_t>* mapBuf;
+static const std::vector<uint8_t>* mapRef;
+static uint32_t mapNext;  // the next sector to put on the map
+
+static void mapClear() {
+  for (int i = 0; i < MAP_SECTORS; i++) {
+    mapKind[i] = MAP_UNREAD;
+    mapMark[i] = MARK_NONE;
+    mapCheck[i] = CHECK_NONE;
+  }
+  mapAt = -1;
+  mapChecking = false;
+  mapSeq++;
+}
+
+static uint8_t kindOf(const uint8_t* p, uint32_t s) {
+  if (s * SECTOR < WRITE_FROM) {
+    return MAP_HEAD;
+  }
+  if (s * SECTOR >= WRITE_TO) {
+    return MAP_KEEP;
+  }
+  for (uint32_t i = 0; i < SECTOR; i++) {
+    if (p[i] != 0xFF) {
+      return MAP_DATA;
+    }
+  }
+  return MAP_FREE;
+}
+
+// (uboot::read's progress)
+static void mapProgress(uint32_t d, uint32_t t) {
+  progress(d, t);
+  if (!mapBuf || mapBuf->size() < d) {
+    return;
+  }
+  for (; (mapNext + 1) * SECTOR <= d && mapNext < MAP_SECTORS; mapNext++) {
+    const uint8_t* p = mapBuf->data() + mapNext * SECTOR;
+    if (mapRef) {
+      bool same = mapRef->size() >= (mapNext + 1) * SECTOR && !memcmp(p, mapRef->data() + mapNext * SECTOR, SECTOR);
+      mapCheck[mapNext] = same ? CHECK_SAME : CHECK_BAD;
+    } else {
+      mapKind[mapNext] = kindOf(p, mapNext);
+    }
+  }
+  mapAt = mapNext < MAP_SECTORS && d < t ? (int)mapNext : -1;
+  mapSeq++;
+}
+
+// the whole flash into out, onto the map: against ref (a reading again), or not
+static const char* mapRead(const uboot::Chip& chip, std::vector<uint8_t>& out, const std::vector<uint8_t>* ref) {
+  mapBuf = &out;
+  mapRef = ref;
+  mapNext = 0;
+  mapChecking = ref != 0;
+  const char* e = uboot::read(chip, out, mapProgress);
+  mapBuf = mapRef = 0;
+  mapAt = -1;
+  mapSeq++;
+  return e;
+}
+
+// an SMK-37's calibration sector: kept (never written)
+static void mapSmk(const std::vector<uint8_t>& flash) {
+  if (uboot::smkFlash(flash) && SMK_CAL / SECTOR < MAP_SECTORS) {
+    mapKind[SMK_CAL / SECTOR] = MAP_KEEP;
+    mapSeq++;
+  }
+}
+
 // JieLi's loader: once, from jl-uboot-tool
 static bool getLoader() {
   if (uboot::haveLoader()) {
@@ -478,11 +555,12 @@ static void backupJob(void*) {
   if (!e) {
     step = READING_FLASH;
     reading = 1;
-    e = uboot::read(chip, a, progress);
+    e = mapRead(chip, a, 0);
+    mapSmk(a);
   }
   if (!e) {
     reading = 2;
-    e = uboot::read(chip, b, progress);
+    e = mapRead(chip, b, &a);
     if (!e && a != b) {
       e = "It read differently twice: try again.";
     }
@@ -508,6 +586,7 @@ bool jobs::backup(int d) {
   }
   device = d;
   reading = 0;
+  mapClear();
   return start(BACKUP, backupJob);
 }
 
@@ -621,7 +700,8 @@ static void recoverJob(void*) {
   if (!e) {
     step = READING_FLASH;
     reading = 1;
-    e = uboot::read(chip, now, progress);
+    e = mapRead(chip, now, 0);
+    mapSmk(now);
   }
   // the flash as it was, first: whatever happens next, it's on the SD card
   if (!e) {
@@ -656,10 +736,18 @@ static void recoverJob(void*) {
     if (memcmp(want.data(), now.data(), WRITE_FROM)) {
       hal::log("recover: its head differs from the image's (it isn't written)");
     }
+    for (uint32_t a : sectors) {
+      if (a / SECTOR < MAP_SECTORS) {
+        mapMark[a / SECTOR] = MARK_DIFFERS;
+      }
+    }
+    mapSeq++;
     step = WRITING_FLASH;
     total = sectors.size();
     done = 0;
     for (uint32_t a : sectors) {
+      mapAt = a / SECTOR;
+      mapSeq++;
       for (int t = 0; t < 3; t++) {
         e = uboot::writeSector(a, &expect[a]);
         if (!e) {
@@ -670,13 +758,19 @@ static void recoverJob(void*) {
       if (e) {
         break;
       }
+      if (a / SECTOR < MAP_SECTORS) {
+        mapMark[a / SECTOR] = MARK_WRITTEN;
+        mapKind[a / SECTOR] = kindOf(&expect[a], a / SECTOR);  // (what's on it now)
+      }
+      mapAt = -1;
+      mapSeq++;
       done = done + 1;
     }
   }
   if (!e) {
     step = CHECKING_FLASH;
     reading = 2;
-    e = uboot::read(chip, back, progress);
+    e = mapRead(chip, back, &expect);
     if (!e && back != expect) {
       e = "It reads back differently from what was written.";
     }
@@ -698,6 +792,7 @@ bool jobs::recover() {
     return false;
   }
   reading = 0;
+  mapClear();
   return start(RECOVER, recoverJob);
 }
 

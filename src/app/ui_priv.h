@@ -57,6 +57,8 @@ lv_obj_t* line(lv_obj_t* parent, const char* text, const lv_font_t* font, uint32
 lv_obj_t* button(lv_obj_t* parent, const char* text, lv_event_cb_t cb, void* data = 0);
 lv_obj_t* listRow(lv_obj_t* parent, lv_event_cb_t cb, void* data);  // a row to tap: a flex row
 lv_obj_t* chip(lv_obj_t* parent, const char* text, uint32_t color);
+// the flash map (jobs.h) and its key: cells of cell pixels; writing: the recovery's colors too
+lv_obj_t* flashMap(lv_obj_t* parent, int cell, bool writing);
 
 // the pages
 void firmwarePage(lv_obj_t* page);

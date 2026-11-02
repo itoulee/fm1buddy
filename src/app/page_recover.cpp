@@ -76,40 +76,62 @@ void ui::recoverPage(lv_obj_t* page) {
   lv_obj_t* body = scroller(page);
   lv_obj_set_style_pad_row(body, 6, 0);
   wrapped(body, ("Putting " + name + " on it.").c_str(), &lv_font_montserrat_12, t.dim);
+  // its flash, as it's read, written and checked: the map on the left, what's going on beside it
+  int st = jobs::step;
+  bool onFlash = st == jobs::READING_FLASH || st == jobs::SAVING || st == jobs::WRITING_FLASH ||
+                 st == jobs::CHECKING_FLASH || st == jobs::LEAVING;
+  bool showMap = mine && (jobs::running ? onFlash : jobs::mapKind[0] != jobs::MAP_UNREAD);
+  lv_obj_t* text = body;
+  if (showMap) {
+    lv_obj_t* mapRow = flashMap(body, 9, true);
+    lv_obj_set_width(mapRow, LV_PCT(100));
+    lv_obj_t* side = lv_obj_get_child(mapRow, 1);
+    lv_obj_set_flex_grow(side, 1);
+    text = box(side);
+    lv_obj_set_width(text, LV_PCT(100));
+    lv_obj_set_style_pad_row(text, 4, 0);
+    lv_obj_set_style_pad_bottom(text, 6, 0);
+    lv_obj_move_to_index(text, 0);
+  }
+  const lv_font_t* big = showMap ? &lv_font_montserrat_16 : &lv_font_montserrat_20;
   bool waiting = jobs::running && (jobs::step == jobs::GETTING_READY || jobs::step == jobs::KEYING);
   if (jobs::running) {
     // one step at a time: off, on, then it runs
-    status = wrapped(body, devText(jobs::status()).c_str(), &lv_font_montserrat_20, t.accent);
+    status = wrapped(text, devText(jobs::status()).c_str(), big, t.accent);
     if (waiting && hal::keyState() < hal::KEY_ANSWERED) {
-      wrapped(body,
+      wrapped(text,
               "It has to start from no power at all: only then does its chip listen. Plug it straight into fm1buddy's "
               "USB-C adapter (no hub).",
               &lv_font_montserrat_12, t.dim);
-    } else if (!waiting) {
-      wrapped(body, "Leave it plugged in and on.", &lv_font_montserrat_14, t.text);
+    } else if (!waiting && !showMap) {  // (with the map: its status says so)
+      wrapped(text, "Leave it plugged in and on.", &lv_font_montserrat_14, t.text);
     }
   } else if (mine && jobs::ok) {
     status = 0;
-    wrapped(body, jobs::error.empty() ? devText("Done: it's on the FM-1.").c_str() : devText(jobs::error).c_str(), &lv_font_montserrat_16,
+    wrapped(text, jobs::error.empty() ? devText("Done: it's on the FM-1.").c_str() : devText(jobs::error).c_str(), &lv_font_montserrat_16,
             t.accent);
-    wrapped(body, devText("Switch the FM-1 off and on: it starts what was written. Then plug the hub back in, and tap Done.").c_str(),
+    wrapped(text, devText("Switch the FM-1 off and on: it starts what was written. Then plug the hub back in, and tap Done.").c_str(),
             &lv_font_montserrat_14, t.text);
   } else {
     status = 0;
-    wrapped(body, mine ? devText(jobs::error).c_str() : "Busy: try again.", &lv_font_montserrat_14, t.knob[0]);
+    wrapped(text, mine ? devText(jobs::error).c_str() : "Busy: try again.", &lv_font_montserrat_14, t.knob[0]);
   }
   if (!jobs::saved.empty() && mine) {
-    wrapped(body, ("Its flash as it was: " BACKUPS_DIR "/" + jobs::saved + ".").c_str(), &lv_font_montserrat_12,
-            t.dim);
+    // (beside the map: under its key)
+    wrapped(showMap ? lv_obj_get_parent(text) : text, ("Its flash as it was: " BACKUPS_DIR "/" + jobs::saved + ".").c_str(),
+            &lv_font_montserrat_12, t.dim);
   }
-  lv_obj_t* row = box(body, LV_FLEX_FLOW_ROW);
+  lv_obj_t* row = box(text, LV_FLEX_FLOW_ROW_WRAP);
   lv_obj_set_style_pad_top(row, 6, 0);
   lv_obj_set_style_pad_column(row, 8, 0);
+  cancelBtn = 0;
   if (jobs::running) {
-    // only while nothing is going on it yet
-    cancelBtn = button(row, LV_SYMBOL_CLOSE " Cancel", doneTapped);
-    if (!waiting) {
-      lv_obj_add_state(cancelBtn, LV_STATE_DISABLED);
+    // only while nothing is going on it yet (and not at all beside the map: it's going on)
+    if (!showMap) {
+      cancelBtn = button(row, LV_SYMBOL_CLOSE " Cancel", doneTapped);
+      if (!waiting) {
+        lv_obj_add_state(cancelBtn, LV_STATE_DISABLED);
+      }
     }
   } else {
     if (!(mine && jobs::ok)) {

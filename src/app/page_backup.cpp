@@ -76,8 +76,12 @@ void ui::backupPage(lv_obj_t* page) {
   lv_obj_t* body = scroller(page);
   lv_obj_set_style_pad_row(body, 4, 0);
   shownSeq = midi::seq;
-  wrapped(body, "All of its flash to the SD card: its firmware, settings, projects and samples. Nothing on it changes.",
-          t.dim);
+  // the flash map, once there's one (it's read, or being read): instead of what a backup is, so it all fits
+  bool map = jobs::kind == jobs::BACKUP && (jobs::running || jobs::mapKind[0] != jobs::MAP_UNREAD);
+  if (!map) {
+    wrapped(body, "All of its flash to the SD card: its firmware, settings, projects and samples. Nothing on it changes.",
+            t.dim);
+  }
   int d = fm1::current();
   const Fm1Id* id = d >= 0 ? fm1::known(d) : 0;
   int others = 0;
@@ -93,6 +97,10 @@ void ui::backupPage(lv_obj_t* page) {
   }
   status = label(body, jobs::running ? devText(jobs::status()).c_str() : "", &lv_font_montserrat_14, t.accent);
   lv_obj_update_flag(status, LV_OBJ_FLAG_HIDDEN, !jobs::running);
+  // its flash, as it's read (and after: what's on it)
+  if (map) {
+    flashMap(body, 8, false);
+  }
   if (!jobs::running) {
     std::string what = d < 0    ? devText("No FM-1 on the hub.")
                        : others ? devText("Unplug the other USB devices: the FM-1 has to be alone on the hub.")
