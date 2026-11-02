@@ -6,7 +6,8 @@
 //
 // openscad -D 'part="lid"' -o lid.stl fm1buddy-case.scad (tools/cases.sh makes them all)
 //
-// The board's size is from LCDwiki's ES3C28P outline drawing (the same board). x from its USB-C end, y across it, z up
+// The board's size is from LCDwiki's ES3C28P outline drawing (the same board): 86 x 50, holes 3.2 at 4 from its edges
+// (5.6 pads), parts up to 4.7 under it, the display and touch panel 4.3 (+-0.2) over it. x from its USB-C end, y across it, z up
 // from the floor.
 
 /* [What] */
@@ -33,7 +34,7 @@ switch_hole = [0, 0];  // none (the board sleeps by itself); [9, 4.2]: a mini sl
 $fn = 48;
 LID_COLOR = "#ff8a3d";   // the installer page's orange
 BASE_COLOR = "#36b37e";
-PCB = 1.57;
+PCB = 1.6;
 eps = 0.01;
 
 // ---------------------------------------------------------------------------------------------- board ---
@@ -42,6 +43,7 @@ eps = 0.01;
 S3 = [86, 50];
 S3_HOLES = [[4, 4], [82, 4], [4, 46], [82, 46]];
 S3_FRONT = 4.3;                                              // the display and touch panel, above its board
+FRONT_CLEAR = 0.5;                                           // over them to the lid (their tolerance: the lid sits on the walls, not them)
 S3_BACK = 4.7;                                               // its tallest parts underneath
 S3_WIN = [[16.0, 2.6], [76.0, 47.4]];                        // the window: visible area 58.05 x 43.6 at x 17 .. 75
 S3_USB = [25, 3.2];                                          // its USB-C: y of the middle, height under the board
@@ -126,7 +128,7 @@ module pegs(holes, h, d_post, d_peg, peg_h) {
 // adapter. The box is wider than the board across, so the lid's lip clears the display glass (as wide as the
 // board); posts in the lid hold the board down at its holes. Paperclip holes in the floor can reach BOOT and RESET
 s_bz = (battery ? bat.z + 0.7 : 0) + S3_BACK + 0.8;           // the board's underside
-s_inner_h = s_bz + PCB + S3_FRONT + 0.2;
+s_inner_h = s_bz + PCB + S3_FRONT + FRONT_CLEAR;
 sc0 = [-gap, -gap - 1.5];
 sc1 = [S3.x + gap, S3.y + gap + 1.5];
 // the battery's corner: in the middle, clear of the posts (x 7 .. 79) and the paperclip holes, wall to wall across
