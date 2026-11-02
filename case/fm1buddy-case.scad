@@ -65,17 +65,6 @@ module slot(w, h, c = 1) {
   polygon([[0, 0], [w, 0], [w, h - c], [w - c, h], [c, h], [0, h - c]]);
 }
 
-// a round hole that prints: its top a 45 degree point, cut flat a little above the circle
-module teardrop(r) {
-  intersection() {
-    union() {
-      circle(r);
-      rotate(45) square(r);
-    }
-    translate([-r, -r]) square([2 * r, 2.15 * r]);
-  }
-}
-
 // a hole through a wall, centered on c (the wall's plane is given by axis: 0 = x wall, 1 = y wall)
 module wall_hole(axis, c, w, h) {
   t = wall + gap + 2;
@@ -144,9 +133,13 @@ module s3_base() {
     }
     // the OTG adapter's plug (its body is bigger than the socket)
     wall_hole(0, [sc0.x - wall / 2, S3_USB.x, usb_z], 13, 7.5);
-    // the SD card, and a notch to push it in with a fingernail
+    // the SD card, and a notch to push it in with a fingernail: below the slot, so its top stays one bridge (a notch
+    // above it would leave the slot's top held at one end only)
     wall_hole(1, [S3_SD, sc1.y + wall / 2, s_bz - 1.0], 16, 4);
-    translate([S3_SD, sc1.y - 1, s_bz - 1.0]) rotate([90, 0, 0]) mirror([0, 0, 1]) linear_extrude(wall + 2) teardrop(4.5);
+    translate([S3_SD, sc1.y - 1, s_bz - 1.0]) rotate([90, 0, 0]) mirror([0, 0, 1]) linear_extrude(wall + 2) intersection() {
+      circle(4.5);
+      translate([-5, -5]) square([10, 5 + 2]);  // (up to the slot's top)
+    }
     // BOOT and RESET, for a paperclip from underneath
     if (button_holes) for (b = S3_BTN) translate([b.x + 0.4, b.y, -floor_t - 1]) cylinder(d = 2.4, h = floor_t + 2);
     // thin under the RGB LED, so it shows through (a battery covers it)
