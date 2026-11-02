@@ -54,6 +54,25 @@ enum Step { IDLE,
             CHECKING_FLASH,  // RECOVER: all of it read again
             WORKING };       // SLOOP_*: doing (done, total)
 
+// The flash map (BACKUP, RECOVER): the FM-1's flash a 4 KiB sector at a time, what's on it and what happened to it, as
+// it happens (the UI draws it: ui::flashMap)
+#define MAP_SECTORS 256
+enum MapKind : uint8_t { MAP_UNREAD,  // not read yet
+                         MAP_HEAD,    // what the chip starts from (its header, SPL): never written
+                         MAP_KEEP,    // key/MAC, an SMK-37's calibration: never written
+                         MAP_DATA,    // the firmware, and what it keeps
+                         MAP_FREE };  // erased
+enum MapMark : uint8_t { MARK_NONE,
+                         MARK_DIFFERS,  // RECOVER: to be written
+                         MARK_WRITTEN };
+enum MapCheck : uint8_t { CHECK_NONE,
+                          CHECK_SAME,   // read again, and the same
+                          CHECK_BAD };  // read again, and not the same
+extern std::atomic<uint8_t> mapKind[MAP_SECTORS], mapMark[MAP_SECTORS], mapCheck[MAP_SECTORS];
+extern std::atomic<int> mapAt;         // the sector being read or written now (-1: none)
+extern std::atomic<bool> mapChecking;  // reading it again: what isn't checked yet is still to be
+extern std::atomic<uint32_t> mapSeq;   // goes up as the map changes
+
 extern std::atomic<int> kind, step;
 extern std::atomic<bool> running;
 extern std::atomic<uint32_t> finished;     // counts the jobs that have ended

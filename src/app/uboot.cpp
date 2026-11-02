@@ -238,8 +238,8 @@ const char* uboot::read(const Chip& chip, std::vector<uint8_t>& out, void (*prog
     if (!ok) {
       return "It stopped answering.";
     }
-    if (progress && !(at % (16 * io))) {
-      progress(at + IO, chip.size);
+    if (progress) {
+      progress(at + n, chip.size);  // (each read: the flash map shows each sector)
     }
   }
   if (progress) {
