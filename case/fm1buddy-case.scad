@@ -20,8 +20,11 @@ wall = 2.0;
 floor_t = 1.6;
 lid_t = 1.6;
 gap = 0.6;    // around the boards
-fit = 0.25;   // between the lid's lip and the walls
-lip_h = 4;
+fit = 0.2;    // between the lid's lip and the walls
+lip_h = 4;  // (no lower: it would reach the board's ends)
+snap = 0.55;  // how far the lid's ridges reach into the walls' grooves (past fit)
+preload = 0.1;  // how much the ridges press up on the grooves' tops: the lid pulled down onto the walls, no rattle
+clear = 0.3;  // between the board and what's above it: the lid's posts don't press on it, the pegs don't poke out
 
 /* [Battery] */
 bat = [68, 52, 11];  // room for a 10 mm 3000 mAh cell: 105060, 104060, 103665 (MakerFocus's), or 7.5 x 50 x 60; 503035 (500 mAh): [36, 31, 5.2]
@@ -52,31 +55,62 @@ module rbox(p0, p1, r = 1.5) {
   translate([p0.x + r, p0.y + r, p0.z]) linear_extrude(s.z) offset(r) square([s.x - 2 * r, s.y - 2 * r]);
 }
 
+// Everything prints without supports: nothing overhangs more than 45 degrees, but the flat tops of holes (bridges)
+
+// a hole's shape, w x h: a flat top (a bridge) with its corners cut at 45 degrees
+module slot(w, h, c = 1) {
+  c = min(c, w / 2, h / 2);
+  polygon([[0, 0], [w, 0], [w, h - c], [w - c, h], [c, h], [0, h - c]]);
+}
+
+// a round hole that prints: its top a 45 degree point, cut flat a little above the circle
+module teardrop(r) {
+  intersection() {
+    union() {
+      circle(r);
+      rotate(45) square(r);
+    }
+    translate([-r, -r]) square([2 * r, 2.15 * r]);
+  }
+}
+
 // a hole through a wall, centered on c (the wall's plane is given by axis: 0 = x wall, 1 = y wall)
-module wall_hole(axis, c, w, h, r = 1) {
+module wall_hole(axis, c, w, h) {
   t = wall + gap + 2;
-  if (axis == 0) translate([c.x - t / 2, c.y - w / 2, c.z - h / 2]) rotate([90, 0, 90]) linear_extrude(t) offset(r) offset(-r) square([w, h]);
-  else translate([c.x - w / 2, c.y + t / 2, c.z - h / 2]) rotate([90, 0, 0]) linear_extrude(t) offset(r) offset(-r) square([w, h]);
+  if (axis == 0) translate([c.x - t / 2, c.y - w / 2, c.z - h / 2]) rotate([90, 0, 90]) linear_extrude(t) slot(w, h);
+  else translate([c.x - w / 2, c.y + t / 2, c.z - h / 2]) rotate([90, 0, 0]) linear_extrude(t) slot(w, h);
+}
+
+// a 45 degree ridge (or groove) along x, centered on c, reaching d either side of it
+module ridge(c, len, d) {
+  translate(c) rotate([0, 90, 0]) linear_extrude(len, center = true) rotate(45) square(d * sqrt(2), center = true);
 }
 
 // --------------------------------------------------------------------------------------- the box ---
-// cavity [x0, y0] .. [x1, y1], height h (from the floor's top); a snap groove along both long sides
+// cavity [x0, y0] .. [x1, y1], height h (from the floor's top); a snap groove along both long sides (45 degree faces:
+// no supports). Deeper than the lid's ridges reach, and a little lower: a ridge's top face meets the groove's top face
+// (with preload), so the lid is held between that and the walls' tops
+groove_d = snap + 0.35;
 module tray(c0, c1, h) {
   difference() {
     rbox([c0.x - wall, c0.y - wall, -floor_t], [c1.x + wall, c1.y + wall, h], 3);
     rbox([c0.x, c0.y, 0], [c1.x, c1.y, h + 1], 1.5);
-    for (y = [c0.y, c1.y]) translate([(c0.x + c1.x) / 2, y, h - lip_h / 2]) rotate([0, 90, 0]) cylinder(r = 0.7, h = (c1.x - c0.x) * 0.5, center = true);
+    for (y = [c0.y, c1.y]) ridge([(c0.x + c1.x) / 2, y, h - lip_h / 2 - (groove_d - snap) - preload], (c1.x - c0.x) * 0.55, groove_d);
   }
 }
 
-// the lid: a plate on the walls, a lip inside them with bumps that click into the grooves
+// the lid: a plate on the walls, a lip inside them with ridges that click into the grooves (the lip bends in a little
+// as they pass the walls' tops)
 module lid_plate(c0, c1) {
   rbox([c0.x - wall, c0.y - wall, 0], [c1.x + wall, c1.y + wall, lid_t], 3);
   difference() {
     rbox([c0.x + fit, c0.y + fit, -lip_h], [c1.x - fit, c1.y - fit, 0], 1.2);
     rbox([c0.x + fit + 1.2, c0.y + fit + 1.2, -lip_h - 1], [c1.x - fit - 1.2, c1.y - fit - 1.2, 1], 0.5);
   }
-  for (y = [c0.y + fit, c1.y - fit]) translate([(c0.x + c1.x) / 2, y, -lip_h / 2]) rotate([0, 90, 0]) cylinder(r = 0.55, h = (c1.x - c0.x) * 0.45, center = true);
+  for (y = [c0.y + fit, c1.y - fit]) intersection() {  // (outward only: none inside the lip)
+    ridge([(c0.x + c1.x) / 2, y, -lip_h / 2], (c1.x - c0.x) * 0.45, fit + snap);
+    translate([c0.x - wall, y < (c0.y + c1.y) / 2 ? y - 5 : y, -lip_h]) cube([c1.x - c0.x + 2 * wall, 5, lip_h]);
+  }
 }
 
 // posts with pegs, for a board's holes
@@ -104,23 +138,23 @@ module s3_base() {
   difference() {
     union() {
       tray(sc0, sc1, s_inner_h);
-      pegs(S3_HOLES, s_bz, 5.4, 2.9, PCB + 0.5);
+      pegs(S3_HOLES, s_bz, 5.4, 2.7, PCB - clear);  // (in the board's holes, not past its top)
     }
     // the OTG adapter's plug (its body is bigger than the socket)
-    wall_hole(0, [sc0.x - wall / 2, S3_USB.x, usb_z], 13, 7.5, 2);
+    wall_hole(0, [sc0.x - wall / 2, S3_USB.x, usb_z], 13, 7.5);
     // the SD card, and a notch to push it in with a fingernail
-    wall_hole(1, [S3_SD, sc1.y + wall / 2, s_bz - 1.0], 16, 4, 0.8);
-    translate([S3_SD, sc1.y - 1, s_bz - 1.0]) rotate([-90, 0, 0]) cylinder(d = 9, h = wall + 2);
+    wall_hole(1, [S3_SD, sc1.y + wall / 2, s_bz - 1.0], 16, 4);
+    translate([S3_SD, sc1.y - 1, s_bz - 1.0]) rotate([90, 0, 0]) mirror([0, 0, 1]) linear_extrude(wall + 2) teardrop(4.5);
     // BOOT and RESET, for a paperclip from underneath
     if (button_holes) for (b = S3_BTN) translate([b.x + 0.4, b.y, -floor_t - 1]) cylinder(d = 2.4, h = floor_t + 2);
     // thin under the RGB LED, so it shows through (a battery covers it)
     if (!battery) translate([S3_LED.x - 4, S3_LED.y - 4, -floor_t + 0.6]) cube([8, 8, floor_t]);
-    if (battery && switch_hole.x > 0) wall_hole(1, [18, sc1.y + wall / 2, bat.z / 2 + 0.5], switch_hole.x, switch_hole.y, 0.5);
+    if (battery && switch_hole.x > 0) wall_hole(1, [18, sc1.y + wall / 2, bat.z / 2 + 0.5], switch_hole.x, switch_hole.y);
   }
 }
 
 module s3_lid() {
-  down = s_inner_h - s_bz - PCB;  // from the lid's underside to the board
+  down = s_inner_h - s_bz - PCB - clear;  // from the lid's underside to just over the board: it stays down, unpressed
   difference() {
     union() {
       lid_plate(sc0, sc1);
