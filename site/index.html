@@ -34,7 +34,7 @@
           <p class="what">A <a href="https://store.freenove.com/products/fnk0104?variant=45040270213318">Freenove ESP32-S3 2.8" touch screen</a> (FNK0104B, a "CYD" with an ESP32-S3) with an SD card: it lists the firmwares on its card and on <a href="https://mutant.cloud/">mutant.cloud</a> (with what each one is), downloads them over Wi-Fi, and installs them on the FM-1. Its USB-C port is a USB host, so a controller on a hub with the FM-1 plays it; Bluetooth MIDI keyboards, phones and computers join in. Nothing to put together.</p>
           <h2>You need</h2>
           <ul>
-            <li>the Freenove ESP32-S3 Display, 2.8", with touch (<strong>FNK0104B</strong>; the A has no touch)</li>
+            <li>the Freenove ESP32-S3 Display, 2.8", with touch (<strong>FNK0104B</strong>; the A has no touch), or the 4" one (<strong>FNK0104S</strong>; the printed case is only for the 2.8")</li>
             <li>a <strong>USB-C OTG adapter with a charging port</strong> (USB-C plug; a USB-A socket and a USB-C charging socket) that passes charging and data <em>at the same time</em>. Look for one sold for the <strong>Chromecast with Google TV</strong>: it's the same situation, a device that is the USB host while it's powered through that port. Many 3-port "splitters" can't: they say "does not support charging and data at the same time". <br />Or a hub with a power input made for the Chromecast or Fire TV (USB-C plug, USB-A ports, a charging port): the adapter and the hub in one.</li>
             <li>a small USB hub (the adapter powers it)</li>
             <li>a USB-C charger or a power bank</li>
@@ -49,8 +49,13 @@
               <strong>Install:</strong> press the button, pick the board's port (<em>USB JTAG/serial debug unit</em>, or <em>usbmodem</em>), and confirm.
               <div class="actions">
                 <esp-web-install-button class="fw-s3">
-                  <button slot="activate" class="button">Install on the CYD-S3</button>
+                  <button slot="activate" class="button">Install on the 2.8" CYD-S3</button>
                   <span slot="unsupported" class="note">This browser can't: use Chrome or Edge on a computer (or <a class="fw-s3-bin" download>download the .bin</a> for esptool: <code>esptool.py --chip esp32s3 write_flash 0x0 fm1buddy-cyd-s3.bin</code>).</span>
+                  <span slot="not-allowed" class="note">The page must be opened over https.</span>
+                </esp-web-install-button>
+                <esp-web-install-button class="fw-s3-4">
+                  <button slot="activate" class="button">Install on the 4" CYD-S3</button>
+                  <span slot="unsupported" class="note">This browser can't: use Chrome or Edge on a computer (or <a class="fw-s3-4-bin" download>download the 4" board's .bin</a> for esptool).</span>
                   <span slot="not-allowed" class="note">The page must be opened over https.</span>
                 </esp-web-install-button>
               </div>

@@ -8,6 +8,12 @@
 #include <string>
 #include <vector>
 
+// the screen, in pixels (landscape): 320x240 on the 2.8" board, the 4" one's build sets 480x320 (platformio.ini)
+#ifndef SCREEN_W
+#define SCREEN_W 320
+#define SCREEN_H 240
+#endif
+
 namespace hal {
 uint32_t millis();
 // a line for the serial console (the terminal, in the simulator)

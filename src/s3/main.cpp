@@ -1,5 +1,6 @@
-// fm1buddy on the CYD-S3 (Freenove ESP32-S3 2.8", FNK0104B): the ILI9341 screen (TFT_eSPI) and the FT6336 touch
-// panel for LVGL, and the app (src/app)
+// fm1buddy on the CYD-S3 (Freenove ESP32-S3 2.8", FNK0104B; or the 4", FNK0104S): the ILI9341 screen (the 4":
+// ST7796, 480x320) through TFT_eSPI and the FT6336 touch panel for LVGL, and the app (src/app). The two boards' pins
+// are the same
 #include <Arduino.h>
 #include <TFT_eSPI.h>
 #include <Wire.h>
@@ -14,8 +15,8 @@
 #include "record.h"
 #include "ui.h"
 
-#define W 320
-#define H 240
+#define W SCREEN_W
+#define H SCREEN_H
 #define FT6336 0x38
 
 static TFT_eSPI tft;
@@ -187,7 +188,7 @@ void setup() {
   lv_tick_set_cb(tick);
   lv_log_register_print_cb([](lv_log_level_t, const char* s) { hal::log("%s", s); });
   lv_display_t* disp = lv_display_create(W, H);
-  const size_t n = W * 40 * 2;
+  const size_t n = 320 * 40 * 2;  // (the same internal RAM on either screen: fewer rows on the 4")
   void* a = heap_caps_malloc(n, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
   void* b = heap_caps_malloc(n, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
   lv_display_set_buffers(disp, a, b, n, LV_DISPLAY_RENDER_MODE_PARTIAL);
