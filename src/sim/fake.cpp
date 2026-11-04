@@ -46,6 +46,7 @@ static struct {
   bool fomajam, playing;
   bool sloop;    // it runs SLOOP (its editor protocol: sloopAnswer)
   bool felucca;  // ... or plain Felucca (the same, but 3 sample slots, no backups)
+  bool lostCal;  // its flash's SMK-37 calibration sector is blank (an SMK-37 that lost it: it looks like an FM-1)
   bool smk;      // it's an SMK-37 Elite on its stock firmware (the FM-1's chip and update, its own name)
   std::vector<uint8_t> song, kits, in;
   uint32_t inTotal, inGot;
@@ -576,6 +577,10 @@ void fake::feluccaMode(bool on) {
   f.sloop = f.felucca = on;
 }
 
+void fake::lostCalMode(bool on) {
+  f.lostCal = on;
+}
+
 void fake::smkMode(bool on) {
   f.smk = on;
 }
@@ -626,6 +631,9 @@ static void ubootEnter() {
     memcpy(&ub.flash[0x93000], f.ident.c_str(), f.ident.size());  // (something to find)
     if (f.smk) {
       memcpy(&ub.flash[0xC1224], "trimdat", 7);  // (the SMK-37's calibration: its own, uboot.h SMK_CAL)
+    }
+    if (f.lostCal) {
+      memset(&ub.flash[0xC1000], 0xFF, 0x1000);
     }
   }
 }
