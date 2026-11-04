@@ -562,8 +562,11 @@ static void detailPage(lv_obj_t* page) {
   const char* why = !id                                                     ? (smk ? "Install: no SMK" : "Install: no FM-1")
                     : sel.product.empty()                                   ? "Not a firmware package"
                     : !id->ota() && !sameHardware(model.c_str(), id->model) ? "Not for this device"
-                    : source == HUB && !sel.onSd && !hal::sd()              ? "Install: no SD card"
-                                                                            : 0;
+                    // (an update loader's name can be another firmware's: one saying SMK-37 is one, so only the
+                    // SMK-37's go on it; one saying FM-1 may be an SMK-37 with an FM-1 firmware's loader)
+                    : id->ota() && isSmk(id->model) && !smk    ? "Not for this device"
+                    : source == HUB && !sel.onSd && !hal::sd() ? "Install: no SD card"
+                                                               : 0;
   lv_obj_t* inst = button(actions, why ? why : id->ota() ? "Finish install"
                                                          : "Install",
                           why ? 0 : install);
