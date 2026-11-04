@@ -694,7 +694,7 @@ static void recoverJob(void*) {
       }
     }
   }
-  if (!e && (chip.key != FM1_KEY || chip.flashId != FM1_FLASH || chip.size < WRITE_TO)) {
+  if (!e && (chip.key != FM1_KEY || !uboot::fm1Flash(chip.flashId) || chip.size < WRITE_TO)) {
     e = "That isn't the FM-1's chip: nothing was written.";
   }
   if (!e) {
