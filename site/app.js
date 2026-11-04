@@ -8,6 +8,8 @@ const REPO = 'konsumer/fm1buddy'
 const FW = {
   s3: 'fw/fm1buddy-cyd-s3.bin',
   manifest: 'fw/manifest.json',
+  s3x4: 'fw/fm1buddy-cyd-s3-4.bin', // the 4" board's (releases before it have none)
+  manifest4: 'fw/manifest-4.json',
   version: 'fw/version.json'
 }
 
@@ -44,12 +46,18 @@ async function release() {
   } catch (_) {}
 
   if (!here) {
-    noFirmware()
+    noFirmware('.fw-s3 button, .fw-s3-bin, .fw-s3-4 button, .fw-s3-4-bin')
     el.innerHTML = latest ? `The latest release, <a href="${latest.html_url}">${latest.tag_name}</a>, isn't on this page yet: get the files from there.` : `There's no release yet: <a href="https://github.com/${REPO}">build it from the source</a>.`
     return
   }
   $('.fw-s3-bin').href = FW.s3
   $('.fw-s3').setAttribute('manifest', FW.manifest)
+  if ((await fetch(FW.manifest4, { method: 'HEAD', cache: 'no-cache' }).catch(() => ({}))).ok) {
+    $('.fw-s3-4-bin').href = FW.s3x4
+    $('.fw-s3-4').setAttribute('manifest', FW.manifest4)
+  } else {
+    noFirmware('.fw-s3-4 button, .fw-s3-4-bin')
+  }
 
   const date = latest && latest.tag_name === here ? ` · ${new Date(latest.published_at).toLocaleDateString()}` : ''
   const url = `https://github.com/${REPO}/releases/tag/${encodeURIComponent(here)}`

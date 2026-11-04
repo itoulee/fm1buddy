@@ -36,7 +36,7 @@ jobs:
           tag=
           for t in $(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --json tagName -q '.[].tagName'); do
             if gh release download "$t" --repo "$GITHUB_REPOSITORY" --dir site/fw --clobber \
-              --pattern fm1buddy-cyd-s3.bin 2>/dev/null && [ -f site/fw/fm1buddy-cyd-s3.bin ]; then
+              --pattern 'fm1buddy-cyd-s3*.bin' 2>/dev/null && [ -f site/fw/fm1buddy-cyd-s3.bin ]; then
               tag=$t
               break
             fi
@@ -46,6 +46,11 @@ jobs:
             jq -n --arg tag "$tag" '{tag: $tag}' > site/fw/version.json
             jq -n --arg v "$tag" '{name: "fm1buddy", version: $v, new_install_prompt_erase: true,
               builds: [{chipFamily: "ESP32-S3", parts: [{path: "fm1buddy-cyd-s3.bin", offset: 0}]}]}' > site/fw/manifest.json
+            # the 4" board's, from the releases that have it
+            if [ -f site/fw/fm1buddy-cyd-s3-4.bin ]; then
+              jq -n --arg v "$tag" '{name: "fm1buddy (4\")", version: $v, new_install_prompt_erase: true,
+                builds: [{chipFamily: "ESP32-S3", parts: [{path: "fm1buddy-cyd-s3-4.bin", offset: 0}]}]}' > site/fw/manifest-4.json
+            fi
           else
             rm -f site/fw/*
             echo "no release with firmware yet: the page says so"
