@@ -106,7 +106,11 @@ bool backup(int d);  // device d: the FM-1
 // downloaded if it isn't there, and the board restarts into recovery mode
 bool prepare(const std::string& from);
 std::string recovering();  // what's going on it ("" if nothing)
-bool recover();            // in recovery mode: put it on
+// RECOVER failed because the device's calibration sector is blank and the backup has one: it may be an SMK-37 whose
+// calibration was lost (or an FM-1): after giveCalibration(), the next try puts the backup's on it
+extern bool calLost;
+void giveCalibration();
+bool recover();  // in recovery mode: put it on
 // SLOOP (sloop.h), on device d: a backup; a backup back (file, in /sloop); project from (0, 2..5) of a backup as project
 // to; a sample source (in /sloop/samples) into slot 0..3
 bool sloopBackup(int d);

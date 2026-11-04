@@ -592,7 +592,15 @@ bool jobs::backup(int d) {
 
 // ---------------------------------------------------------------------------------------- recovery ---
 #define RECOVER_KEY "recover"
+#define RECOVER_CAL_KEY "recovercal"
 static char recoverFrom[160];  // what goes on it: "/fm1/x.fwsc" or "/backups/fm1-3.bin", kept across the restart
+static uint8_t recoverCal;     // 1: the backup's calibration goes on it too (jobs.h calLost), kept across the restart
+bool jobs::calLost;
+
+void jobs::giveCalibration() {
+  recoverCal = 1;
+  hal::save(RECOVER_CAL_KEY, &recoverCal, 1);
+}
 
 static bool isBackup(const std::string& p) {
   return p.size() > 4 && !strcasecmp(p.c_str() + p.size() - 4, ".bin");
@@ -608,6 +616,7 @@ static void prepareJob(void*) {
     return finish(false);
   }
   hal::save(RECOVER_KEY, recoverFrom, sizeof recoverFrom);
+  hal::save(RECOVER_CAL_KEY, &recoverCal, 1);
   finish(true);
   hal::recoveryModeSet(true);  // (the board restarts)
 }
@@ -617,6 +626,7 @@ bool jobs::prepare(const std::string& from) {
     return false;
   }
   snprintf(recoverFrom, sizeof recoverFrom, "%s", from.c_str());
+  recoverCal = 0;  // (a new choice: only its own calibration)
   return start(PREPARE, prepareJob);
 }
 
@@ -668,6 +678,11 @@ static const char* image(const std::string& from, std::vector<uint8_t>& out, boo
 
 static void recoverJob(void*) {
   std::string from = recovering();
+  if (!hal::load(RECOVER_CAL_KEY, &recoverCal, 1)) {
+    recoverCal = 0;
+  }
+  bool cal = recoverCal == 1;
+  calLost = false;
   std::vector<uint8_t> want, now, back;
   bool forSmk = false;
   step = GETTING_READY;
@@ -711,18 +726,33 @@ static void recoverJob(void*) {
   // an FM-1 and an SMK-37 look the same to here: what's on its flash says which it is. The SMK-37's calibration is
   // its own (never written): another SMK-37's backup goes on it with its own calibration kept
   bool smk = !e && uboot::smkFlash(now);
+  // its calibration sector blank, and an SMK-37's backup with one going on: an SMK-37 whose calibration was lost, or an
+  // FM-1. Only when that's said (prepare withCal) does the backup's go on it; one it has is never written
+  bool giveCal = false;
+  if (!e && !smk && forSmk && isBackup(from) && uboot::smkFlash(want)) {
+    bool blank = std::all_of(now.begin() + SMK_CAL, now.begin() + SMK_CAL + SECTOR, [](uint8_t b) { return b == 0xFF; });
+    hal::log("recover: no calibration on it (its sector %s)", blank ? "blank" : "not blank");
+    if (blank && cal) {
+      smk = giveCal = true;
+    } else if (blank) {
+      calLost = true;
+      e = "No calibration: an FM-1, or an SMK-37 that lost it. Nothing was written.";
+    }
+  }
   if (!e) {
-    hal::log("recover: it's %s, the image is for %s", smk ? "an SMK-37" : "an FM-1", forSmk ? "an SMK-37" : "an FM-1");
+    hal::log("recover: it's %s, the image is for %s%s", smk ? "an SMK-37" : "an FM-1", forSmk ? "an SMK-37" : "an FM-1",
+             giveCal ? " (with the backup's calibration)" : "");
     if (smk != forSmk) {
       e = smk ? "This is an SMK-37, and that's for the FM-1: nothing was written."
-              : "This is an FM-1, and that's for the SMK-37: nothing was written.";
+              : "This is an FM-1 (no SMK-37 calibration on it), and that's for the SMK-37: nothing was written. An "
+                "SMK-37 whose calibration is gone takes another SMK-37's backup.";
     }
   }
   std::vector<uint32_t> sectors;
   std::vector<uint8_t> expect = now;
   if (!e) {
     std::copy(want.begin() + WRITE_FROM, want.end(), expect.begin() + WRITE_FROM);
-    if (smk) {
+    if (smk && !giveCal) {
       std::copy(now.begin() + SMK_CAL, now.begin() + SMK_CAL + SECTOR, expect.begin() + SMK_CAL);  // (never written)
     }
     for (uint32_t a = WRITE_FROM; a < want.size(); a += SECTOR) {
@@ -780,8 +810,12 @@ static void recoverJob(void*) {
     error = std::string(e) + (sectors.empty() ? "" : " It may not start now: switch it off, and try again.");
     return finish(false);
   }
-  error = sectors.empty() ? "It already had that on it." : "";
+  error = sectors.empty() ? "It already had that on it."
+          : giveCal       ? "Done, with the backup's calibration (another keyboard's: keys and pads may be a little off)."
+                          : "";
   hal::save(RECOVER_KEY, "", 1);  // (done: not again)
+  recoverCal = 0;
+  hal::save(RECOVER_CAL_KEY, &recoverCal, 1);
   finish(true);
 }
 

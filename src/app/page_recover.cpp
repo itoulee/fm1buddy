@@ -48,6 +48,12 @@ static void againTapped(lv_event_t*) {
   go(recoverPage);
 }
 
+// an SMK-37 whose calibration is gone: the backup's goes on it (said by the person: an FM-1 looks the same)
+static void giveCalTapped(lv_event_t* e) {
+  jobs::giveCalibration();
+  againTapped(e);
+}
+
 static void recoverTick() {
   if (jobs::running != shownRunning || jobs::step != shownStep || hal::keyState() != shownKey) {
     go(recoverPage);
@@ -134,7 +140,9 @@ void ui::recoverPage(lv_obj_t* page) {
       }
     }
   } else {
-    if (!(mine && jobs::ok)) {
+    if (mine && !jobs::ok && jobs::calLost) {
+      button(row, LV_SYMBOL_WARNING " It's an SMK-37", giveCalTapped);
+    } else if (!(mine && jobs::ok)) {
       button(row, LV_SYMBOL_REFRESH " Try again", againTapped);
     }
     button(row, LV_SYMBOL_OK " Done", doneTapped);
