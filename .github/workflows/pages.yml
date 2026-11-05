@@ -46,7 +46,11 @@ jobs:
             jq -n --arg tag "$tag" '{tag: $tag}' > site/fw/version.json
             jq -n --arg v "$tag" '{name: "fm1buddy", version: $v, new_install_prompt_erase: true,
               builds: [{chipFamily: "ESP32-S3", parts: [{path: "fm1buddy-cyd-s3.bin", offset: 0}]}]}' > site/fw/manifest.json
-            # the 4" board's, from the releases that have it
+            # the 3.5" board's, and the 4"'s, from the releases that have them
+            if [ -f site/fw/fm1buddy-cyd-s3-35.bin ]; then
+              jq -n --arg v "$tag" '{name: "fm1buddy (3.5\")", version: $v, new_install_prompt_erase: true,
+                builds: [{chipFamily: "ESP32-S3", parts: [{path: "fm1buddy-cyd-s3-35.bin", offset: 0}]}]}' > site/fw/manifest-35.json
+            fi
             if [ -f site/fw/fm1buddy-cyd-s3-4.bin ]; then
               jq -n --arg v "$tag" '{name: "fm1buddy (4\")", version: $v, new_install_prompt_erase: true,
                 builds: [{chipFamily: "ESP32-S3", parts: [{path: "fm1buddy-cyd-s3-4.bin", offset: 0}]}]}' > site/fw/manifest-4.json
