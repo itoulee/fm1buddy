@@ -11,6 +11,8 @@
 // the screen, in pixels (landscape): 320x240 on the 2.8" board, the 4" one's build sets 480x320 (platformio.ini)
 #ifndef SCREEN_W
 #define SCREEN_W 320
+#endif
+#ifndef SCREEN_H
 #define SCREEN_H 240
 #endif
 

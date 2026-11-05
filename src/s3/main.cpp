@@ -182,29 +182,13 @@ void setup() {
   tft.init();
   hal::backlight(0);  // (TFT_eSPI lit it: dark until the app's frame is drawn, ui::frame)
   tft.setRotation(1);
-#if SCREEN_W == 480
-  // the 4": its panel keeps what it showed through a restart (the chip resets, the panel doesn't), so all of it black
-  // first: what the app doesn't draw isn't the last firmware's
-  tft.fillScreen(TFT_BLACK);
-#endif
-#ifdef SCREEN_TEST
-  // a test build's color bars for 2 s: red, green, blue, white, then black, and a white line around the whole screen
-  static const uint16_t bars[] = {TFT_RED, TFT_GREEN, TFT_BLUE, TFT_WHITE, TFT_BLACK};
-  for (int i = 0; i < 5; i++) {
-    tft.fillRect(W * i / 5, 0, W / 5 + 1, H, bars[i]);
-  }
-  tft.drawRect(0, 0, W, H, TFT_WHITE);
-  hal::backlight(100);
-  delay(2000);
-  hal::backlight(0);
-#endif
 
   hal::log("boot: lvgl at %u ms", (unsigned)millis());
   lv_init();
   lv_tick_set_cb(tick);
   lv_log_register_print_cb([](lv_log_level_t, const char* s) { hal::log("%s", s); });
   lv_display_t* disp = lv_display_create(W, H);
-  const size_t n = 320 * 40 * 2;  // (the same internal RAM on either screen: fewer rows on the 4")
+  const size_t n = 320 * 40 * 2;  // a buffer of 12 KB (about 40 rows of the 2.8", 27 of the 4"), as internal RAM has
   void* a = heap_caps_malloc(n, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
   void* b = heap_caps_malloc(n, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
   lv_display_set_buffers(disp, a, b, n, LV_DISPLAY_RENDER_MODE_PARTIAL);
