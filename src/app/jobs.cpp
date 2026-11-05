@@ -1,5 +1,6 @@
 #include "jobs.h"
 
+#include <ctype.h>
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -493,19 +494,32 @@ static bool getLoader() {
   return true;
 }
 
-// a flash as backups/fm1-N.bin (its name into saved), and what it was (fm1-N.txt). With alive: the loader is still
-// running, and kept so (the card can take longer than it waits)
-static bool saveBackup(const std::vector<uint8_t>& a, const uboot::Chip& chip, const std::string& was, bool alive) {
+// a flash as backups/fm1-N-FW.bin (its name into saved), and what it was (fm1-N-FW.txt). FW: the firmware it ran
+// ("FM-1_904"), when that's known. N comes first (the lists sort by it). With alive: the loader is still running, and
+// kept so (the card can take longer than it waits)
+static bool saveBackup(const std::vector<uint8_t>& a, const uboot::Chip& chip, const std::string& was, bool alive,
+                       const std::string& fw = "") {
   std::string dir = catalog::path(BACKUPS_DIR);
   mkdir(dir.c_str(), 0777);
-  struct stat st;
   bool smk = uboot::smkFlash(a);
-  std::string base = dir + (smk ? "/smk-" : "/fm1-");  // (an SMK-37's has its calibration: uboot.h)
+  const char* prefix = smk ? "smk-" : "fm1-";  // (an SMK-37's has its calibration: uboot.h)
+  // N: one past the highest there (with or without a firmware in its name)
   int n = 1;
-  while (n < 1000 && !stat((base + std::to_string(n) + ".bin").c_str(), &st)) {
-    n++;
+  if (DIR* dd = opendir(dir.c_str())) {
+    while (dirent* e = readdir(dd)) {
+      if (!strncasecmp(e->d_name, prefix, 4)) {
+        n = std::max(n, atoi(e->d_name + 4) + 1);
+      }
+    }
+    closedir(dd);
   }
-  saved = (smk ? "smk-" : "fm1-") + std::to_string(n) + ".bin";
+  std::string tag;  // the firmware, safe for a file name ("SMK-37 Elite_016" -> "SMK-37-Elite_016")
+  for (char c : fw) {
+    tag += isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.' ? c : '-';
+  }
+  std::string stem = prefix + std::to_string(n) + (tag.empty() ? "" : "-" + tag);
+  std::string base = dir + "/" + stem;
+  saved = stem + ".bin";
   char sha[65] = "";
   hal::sha256(a.data(), a.size(), sha);
   FILE* f = fopen((dir + "/" + saved).c_str(), "wb");
@@ -522,12 +536,12 @@ static bool saveBackup(const std::vector<uint8_t>& a, const uboot::Chip& chip, c
     uboot::keepAlive();
   }
   if (ok) {
-    f = fopen((base + std::to_string(n) + ".txt").c_str(), "w");
+    f = fopen((base + ".txt").c_str(), "w");
     ok = f && fprintf(f,
-                      smk ? "fm1buddy backup: all of the SMK-37's flash, through its boot loader\n"
-                          : "fm1buddy backup: all of the FM-1's flash, through its boot loader\n"
-                            "firmware %s\nchip key %04X\nflash    %06X, %u bytes\nsha256   %s\n",
-                      was.empty() ? "?" : was.c_str(), chip.key, (unsigned)chip.flashId, (unsigned)chip.size, sha) > 0;
+                      "fm1buddy backup: all of the %s's flash, through its boot loader\n"
+                      "firmware %s\nchip key %04X\nflash    %06X, %u bytes\nsha256   %s\n",
+                      smk ? "SMK-37" : "FM-1", was.empty() ? "?" : was.c_str(), chip.key, (unsigned)chip.flashId,
+                      (unsigned)chip.size, sha) > 0;
     ok &= f && !fclose(f);
   }
   if (!ok) {
@@ -577,7 +591,7 @@ static void backupJob(void*) {
     error = std::string(e) + (stuck ? " Switch the FM-1 off and on to get it back." : "");
     return finish(false);
   }
-  finish(saveBackup(a, chip, was, false));
+  finish(saveBackup(a, chip, was, false, was));
 }
 
 bool jobs::backup(int d) {
