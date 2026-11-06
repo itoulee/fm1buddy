@@ -475,11 +475,15 @@ static void startOnPage(lv_obj_t* page) {
   const Theme& t = theme();
   header(page, "Start on", settingsPage);
   lv_obj_t* body = scroller(page);
-  static const char* const ABOUT[STARTS] = {"Installing and saving firmware", "MIDI routing and devices",
-                                            "The mapping's rules", "Play the screen: X/Y pad, pads",
-                                            "Sounds and setups"};
+  static const char* const ABOUT[STARTS] = {"On the card: no Wi-Fi needed",
+                                            "MIDI routing and devices",
+                                            "The mapping's rules",
+                                            "Play the screen: a pad for two fingers",
+                                            "Sounds and setups",
+                                            "The Firmware Hub's list (Wi-Fi)",
+                                            "Play the screen: 16 pads"};
   int now = startPage();
-  for (int i = 0; i < STARTS; i++) {
+  for (int i : START_ORDER) {
     lv_obj_t* r = listRow(body, startPicked, (void*)(intptr_t)i);
     lv_obj_t* col = box(r);
     lv_obj_set_flex_grow(col, 1);

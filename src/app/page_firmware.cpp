@@ -321,6 +321,11 @@ static void pickSort(lv_event_t* e) {
   fillList();
 }
 
+void ui::firmwareSource(bool hub) {
+  source = hub ? HUB : SD;
+  sourceChosen = true;  // (the SD card's even with none on it: no Wi-Fi then)
+}
+
 void ui::firmwarePage(lv_obj_t* page) {
   const Theme& t = theme();
   if (!sourceChosen && catalog::sd.empty()) {

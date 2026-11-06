@@ -71,6 +71,11 @@ static void load() {
   cfg.vel = VEL_WHERE;
 }
 
+void ui::touchMode(bool pads) {
+  load();
+  cfg.mode = pads ? PAD : XY;  // (for now: what's kept is what was picked on the page)
+}
+
 static void saveCfg() {
   hal::save("touch", &cfg, sizeof cfg);
 }
