@@ -2,7 +2,7 @@
 // workflow (fw/): GitHub's release downloads can't be fetched from another site, its API can.
 
 import { init as initMap } from './midimap.js'
-import { init as initMaker } from './casemaker.js'
+import { init as initMaker, pickCase } from './casemaker.js'
 
 const REPO = 'konsumer/fm1buddy'
 // The screens the firmware is made for: the page's switch picks one, and installs its .bin (a release from before a
@@ -101,6 +101,7 @@ for (const b of $$('.board-switch button')) {
   b.addEventListener('click', () => {
     if (!b.disabled) {
       pickBoard(b.dataset.board)
+      pickCase(b.dataset.board)
     }
   })
 }

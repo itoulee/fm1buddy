@@ -6,7 +6,13 @@
 const OPENSCAD = 'https://cdn.jsdelivr.net/npm/openscad-wasm-prebuilt@1.2.0/dist/openscad.js'
 const SCAD = ['fw/fm1buddy-case.scad', 'https://raw.githubusercontent.com/konsumer/fm1buddy/main/case/fm1buddy-case.scad']
 const ROOM = [2, 2, 0.5] // added to the cell's size, for its tolerance and its wires
-const MAX = [72, 53] // the most room there is under the board (the case's assert)
+
+// the boards the case is made for (the case's board), and the most room there is under each (the case's BAT_MAX)
+const BOARDS = {
+  s3: { size: '2.8', max: [72, 53] },
+  's3-35': { size: '3.5', max: [88, 57] },
+  's3-4': { size: '4', max: [98, 64] }
+}
 
 // the cells' own sizes (length, width, thickness): common and cheap
 const PRESETS = [
@@ -27,6 +33,12 @@ const PIECES = [
 ]
 
 let openscad, scadText
+let setBoard = () => {}
+
+// the case for a board (s3, s3-35, s3-4): the installer's switch picks it here too
+export function pickCase(id) {
+  setBoard(id)
+}
 
 async function scad() {
   if (!scadText) {
@@ -177,7 +189,8 @@ export function init() {
   const baseBtn = $('.maker-base')
   const lidBtn = $('.maker-lid')
   let none = false
-  let view, baseStl, lidUrl, baseUrl, timer, busy, again
+  let board = 's3'
+  let view, baseStl, lidUrl, lidBoard, viewLidBoard, baseUrl, timer, busy, again
 
   const say = (text, bad) => {
     status.textContent = text
@@ -186,8 +199,10 @@ export function init() {
 
   // what the case is made with now; or an error (a size that doesn't fit)
   const params = () => {
+    const b = BOARDS[board]
+    const MAX = b.max
     if (none) {
-      return { defines: { battery: false, button_holes: btn.checked }, name: `fm1buddy-case-s3${btn.checked ? '-buttons' : ''}-base.stl` }
+      return { defines: { board: `"${b.size}"`, battery: false, button_holes: btn.checked }, name: `fm1buddy-case-${board}${btn.checked ? '-buttons' : ''}-base.stl` }
     }
     const size = inputs.map((i) => parseFloat(i.value))
     if (size.some((v) => !(v > 0))) {
@@ -198,9 +213,9 @@ export function init() {
       return { error: `That’s too big: a battery up to ${MAX[0] - ROOM[0]} × ${MAX[1] - ROOM[1]} mm fits (any thickness).` }
     }
     return {
-      defines: { battery: true, bat: `[${bat}]`, switch_hole: sw.checked ? '[9, 4.2]' : '[0, 0]', button_holes: btn.checked },
+      defines: { board: `"${b.size}"`, battery: true, bat: `[${bat}]`, switch_hole: sw.checked ? '[9, 4.2]' : '[0, 0]', button_holes: btn.checked },
       bat,
-      name: `fm1buddy-case-s3-battery-${size.join('x')}${sw.checked ? '-switch' : ''}${btn.checked ? '-buttons' : ''}-base.stl`
+      name: `fm1buddy-case-${board}-battery-${size.join('x')}${sw.checked ? '-switch' : ''}${btn.checked ? '-buttons' : ''}-base.stl`
     }
   }
 
@@ -223,8 +238,11 @@ export function init() {
     try {
       view ||= await viewer(canvas)
       for (const piece of PIECES) {
-        if (piece.fixed && view.has(piece.part)) {
-          continue // (made the first time)
+        if (piece.fixed && view.has(piece.part) && viewLidBoard === board) {
+          continue // (made the first time, for this board)
+        }
+        if (piece.fixed) {
+          viewLidBoard = board
         }
         let stl = null
         if (!(piece.battery && none)) {
@@ -251,6 +269,15 @@ export function init() {
       baseBtn.href = baseUrl
       baseBtn.download = p.name
       baseBtn.removeAttribute('aria-disabled')
+      if (lidBoard !== board) {
+        // (the lid made for another board)
+        if (lidUrl) {
+          URL.revokeObjectURL(lidUrl)
+        }
+        lidUrl = null
+        lidBtn.removeAttribute('href')
+        lidBtn.download = `fm1buddy-case-${board}-lid.stl`
+      }
       lidBtn.removeAttribute('aria-disabled')
       say(none ? 'Without a battery. Drag it to turn it.' : `Room for ${p.bat.join(' × ')} mm: the case is ${(p.bat[2] + 0.7).toFixed(1)} mm taller than without a battery. Drag it to turn it.`)
     } catch (e) {
@@ -291,6 +318,27 @@ export function init() {
     i.oninput = changed
   }
 
+  // the board switch: the case for that board (and its picture, until the 3D view is up)
+  const sizes = [...box.querySelectorAll('.maker-board button')]
+  setBoard = (id) => {
+    if (!BOARDS[id] || id === board) {
+      return
+    }
+    board = id
+    for (const b of sizes) {
+      b.setAttribute('aria-checked', String(b.dataset.board === id))
+    }
+    still.src = `case/${id}.png`
+    inputs[0].max = BOARDS[id].max[0] - ROOM[0]
+    inputs[1].max = BOARDS[id].max[1] - ROOM[1]
+    if (started) {
+      changed()
+    }
+  }
+  for (const b of sizes) {
+    b.onclick = () => setBoard(b.dataset.board)
+  }
+
   // the lid to print (flat side down): made when it's asked for
   lidBtn.onclick = async (e) => {
     if (lidUrl || lidBtn.getAttribute('aria-disabled')) {
@@ -299,7 +347,13 @@ export function init() {
     e.preventDefault()
     lidBtn.setAttribute('aria-disabled', 'true')
     try {
-      const stl = await render({ part: '"lid"' })
+      const made = board
+      const stl = await render({ board: `"${BOARDS[made].size}"`, part: '"lid"' })
+      if (made !== board) {
+        lidBtn.removeAttribute('aria-disabled')
+        return // (the board changed meanwhile)
+      }
+      lidBoard = made
       lidUrl = URL.createObjectURL(new Blob([stl], { type: 'model/stl' }))
       lidBtn.href = lidUrl
       lidBtn.removeAttribute('aria-disabled')
@@ -313,10 +367,12 @@ export function init() {
   // start with no battery, once the case is on screen
   none = true
   inputs.forEach((i, k) => (i.value = PRESETS[4].size[k]))
+  let started = false
   new IntersectionObserver(
     (seen, o) => {
       if (seen.some((s) => s.isIntersecting)) {
         o.disconnect()
+        started = true
         changed()
       }
     },
