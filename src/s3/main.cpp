@@ -1,48 +1,22 @@
-// fm1buddy on the CYD-S3 (Freenove ESP32-S3 2.8", FNK0104B): the ILI9341 screen (TFT_eSPI) and the FT6336 touch
-// panel for LVGL, and the app (src/app)
+// fm1buddy on the CYD-S3 (Freenove ESP32-S3 2.8", FNK0104B; 4", FNK0104S; 3.5", FNK0104N): the app (src/app), its
+// screen and touch panel (display.h, touch.h: the 2.8" and the 4" share their pins, the 3.5" has its own, and a QSPI
+// panel), and the hardware the app needs: the USB host, the SD card, Wi-Fi, Bluetooth (src/s3)
 #include <Arduino.h>
-#include <TFT_eSPI.h>
-#include <Wire.h>
 #include <driver/gpio.h>
 #include <esp_sleep.h>
 #include <lvgl.h>
 
 #include "board.h"
+#include "display.h"
 #include "hal.h"
 #include "jobs.h"
 #include "midi.h"
 #include "record.h"
+#include "touch.h"
 #include "ui.h"
 
-#define W 320
-#define H 240
-#define FT6336 0x38
-
-static TFT_eSPI tft;
-
-static void flush(lv_display_t* d, const lv_area_t* a, uint8_t* px) {
-  uint32_t w = lv_area_get_width(a), h = lv_area_get_height(a);
-  tft.startWrite();
-  tft.setAddrWindow(a->x1, a->y1, w, h);
-  tft.pushColors((uint16_t*)px, w * h, true);
-  tft.endWrite();
-  lv_display_flush_ready(d);
-}
-
-// the panel reset first: it takes 300 ms to wake, while the screen starts (touchReady)
-static uint32_t touchReady;
-
-static void touchBegin() {
-  gpio_hold_dis((gpio_num_t)TOUCH_RST);  // (held through a sleep: hal::sleep)
-  gpio_hold_dis((gpio_num_t)TFT_BL);
-  pinMode(TOUCH_INT, INPUT);
-  pinMode(TOUCH_RST, OUTPUT);
-  digitalWrite(TOUCH_RST, 0);
-  delay(10);
-  digitalWrite(TOUCH_RST, 1);
-  touchReady = millis() + 300;
-  Wire.begin(TOUCH_SDA, TOUCH_SCL, 400000);
-}
+#define W SCREEN_W
+#define H SCREEN_H
 
 // a tap from the serial console, until then; or a drag, from (tapX, tapY) to (toX, toY) over 300 ms from dragAt
 static int16_t tapX, tapY, toX, toY;
@@ -69,41 +43,31 @@ static int stretch(int v, int lo, int hi, int size) {
 static hal::Finger seen[2];
 static int nSeen;
 static uint32_t seenAt;
+static int16_t rawX, rawY;  // the first finger as the panel has it (a panel LVGL turns wants these: display::rotated)
 
-// the panel's points: TD_STATUS, then per point XH (event in the top 2 bits) XL YH (its id in the top 4) YL, WEIGHT,
-// MISC (area in the top 4)
+// the fingers as the screen has them: a reading of the panel (touch::read) turned the screen's way (display::toScreen)
 static void readFingers() {
   if (millis() == seenAt) {
     return;  // (read once a millisecond at most: LVGL and the controller both ask)
   }
   seenAt = millis();
-  uint8_t r[13];
   nSeen = 0;
-  if ((int32_t)(millis() - touchReady) < 0) {
-    return;  // (the panel is still waking: touchBegin)
-  }
   if (tapUntil && (int32_t)(tapUntil - millis()) > 0) {  // the console's tap is a finger too (calibration, the pads)
     seen[0] = {tapX, tapY, 0, 32, 2};
     nSeen = 1;
+    int px, py;
+    display::fromScreen(tapX, tapY, px, py);
+    rawX = (int16_t)px, rawY = (int16_t)py;
     return;
   }
-  Wire.beginTransmission(FT6336);
-  Wire.write(0x02);
-  if (Wire.endTransmission(false) || Wire.requestFrom(FT6336, 13) != 13) {
-    return;
-  }
-  for (uint8_t& b : r) {
-    b = Wire.read();
-  }
-  uint8_t n = r[0] & 0x0F;
-  for (int i = 0; i < n && i < 2; i++) {
-    const uint8_t* p = r + 1 + i * 6;
-    if (p[0] >> 6 == 1) {
-      continue;  // lifted
+  touch::Point p[2];
+  int n = touch::read(p, 2);
+  for (int i = 0; i < n; i++) {
+    int x, y;
+    display::toScreen(p[i].x, p[i].y, x, y);
+    if (i == 0) {
+      rawX = p[i].x, rawY = p[i].y;  // (the panel's own pixels: what LVGL wants of a panel it turns)
     }
-    // the panel is portrait: turned as the screen is (rotation 1)
-    int px = (p[0] & 0x0F) << 8 | p[1], py = (p[2] & 0x0F) << 8 | p[3];
-    int x = py, y = H - 1 - px;
     if (calOn && cal.x1 != cal.x0 && cal.y1 != cal.y0) {
       x = stretch(x, cal.x0, cal.x1, W);
       y = stretch(y, cal.y0, cal.y1, H);
@@ -111,9 +75,9 @@ static void readFingers() {
     hal::Finger& f = seen[nSeen++];
     f.x = (int16_t)constrain(x, 0, W - 1);
     f.y = (int16_t)constrain(y, 0, H - 1);
-    f.id = p[2] >> 4;
-    f.weight = p[4];
-    f.area = p[5] >> 4;
+    f.id = p[i].id;
+    f.weight = p[i].weight;
+    f.area = p[i].area;
   }
 }
 
@@ -131,8 +95,15 @@ static void readTouch(lv_indev_t*, lv_indev_data_t* data) {
   if (tapUntil && (int32_t)(tapUntil - millis()) > 0) {
     uint32_t k = dragAt ? millis() - dragAt : 0;  // a drag: along the way (held still at its end, then up)
     k = k > 300 ? 300 : k;
-    data->point.x = (int16_t)(tapX + (toX - tapX) * (int32_t)k / 300);
-    data->point.y = (int16_t)(tapY + (toY - tapY) * (int32_t)k / 300);
+    int16_t x = (int16_t)(tapX + (toX - tapX) * (int32_t)k / 300);
+    int16_t y = (int16_t)(tapY + (toY - tapY) * (int32_t)k / 300);
+    if (display::rotated()) {  // (LVGL turns the panel's own pixels: a tap from the console is in the screen's)
+      int px, py;
+      display::fromScreen(x, y, px, py);
+      x = (int16_t)px, y = (int16_t)py;
+    }
+    data->point.x = x;
+    data->point.y = y;
     data->state = LV_INDEV_STATE_PRESSED;
     return;
   }
@@ -140,8 +111,8 @@ static void readTouch(lv_indev_t*, lv_indev_data_t* data) {
   readFingers();
   data->state = nSeen ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
   if (nSeen) {
-    lx = seen[0].x;
-    ly = seen[0].y;
+    lx = display::rotated() ? rawX : seen[0].x;
+    ly = display::rotated() ? rawY : seen[0].y;
   }
   data->point.x = lx;
   data->point.y = ly;
@@ -150,14 +121,16 @@ static void readTouch(lv_indev_t*, lv_indev_data_t* data) {
 // deep sleep until a finger is on the panel: its INT goes low while one is (in polling mode, G_MODE 0). The panel
 // stays powered and out of reset (its RST held high), the backlight held off, the screen's controller asleep
 void hal::sleep() {
+#ifdef SCREEN_ST77922
+  // the 3.5"'s touch interrupt is GPIO47, and only the chip's RTC pins (0-21) wake it from a deep sleep: it would sleep
+  // until its battery came out
+  hal::log("sleep: not on the 3.5\" board: its touch can't wake it");
+  return;
+#endif
   hal::log("sleep: until the screen is touched");
   board::logNow();
-  Wire.beginTransmission(FT6336);
-  Wire.write(0xA4);
-  Wire.write(0);
-  Wire.endTransmission();
-  tft.writecommand(0x28);  // display off
-  tft.writecommand(0x10);  // sleep in
+  touch::sleep();
+  display::sleep();
   ledcDetach(TFT_BL);
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, !TFT_BACKLIGHT_ON);
@@ -177,21 +150,12 @@ void setup() {
   Serial.begin(115200);
   // the screen first, and the app's frame on it (ui::frame): then the rest
   hal::log("boot: screen at %u ms", (unsigned)millis());
-  touchBegin();
-  tft.init();
-  hal::backlight(0);  // (TFT_eSPI lit it: dark until the app's frame is drawn, ui::frame)
-  tft.setRotation(1);
-
-  hal::log("boot: lvgl at %u ms", (unsigned)millis());
+  touch::begin();
   lv_init();
   lv_tick_set_cb(tick);
   lv_log_register_print_cb([](lv_log_level_t, const char* s) { hal::log("%s", s); });
-  lv_display_t* disp = lv_display_create(W, H);
-  const size_t n = W * 40 * 2;
-  void* a = heap_caps_malloc(n, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-  void* b = heap_caps_malloc(n, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-  lv_display_set_buffers(disp, a, b, n, LV_DISPLAY_RENDER_MODE_PARTIAL);
-  lv_display_set_flush_cb(disp, flush);
+  hal::log("boot: lvgl at %u ms", (unsigned)millis());
+  lv_display_t* disp = display::begin();  // the panel up (its light's off: ui::frame)
   lv_indev_t* in = lv_indev_create();
   lv_indev_set_type(in, LV_INDEV_TYPE_POINTER);
   lv_indev_set_read_cb(in, readTouch);
@@ -248,11 +212,11 @@ static void console() {
         Serial.println(hal::sd() ? "BUSY" : "NOSD");
       }
     } else if (!strcmp(line, "bat")) {
-      // the battery's voltage (GPIO9, halved by the board): 40 readings over 2 s, in mV at the pin
+      // the battery's voltage (BAT_ADC, halved by the board): 40 readings over 2 s, in mV at the pin
       int lo = 99999, hi = 0;
       long sum = 0;
       for (int i = 0; i < 40; i++) {
-        int mv = analogReadMilliVolts(9);
+        int mv = analogReadMilliVolts(BAT_ADC);
         lo = min(lo, mv);
         hi = max(hi, mv);
         sum += mv;

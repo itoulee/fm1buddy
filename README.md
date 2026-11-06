@@ -33,7 +33,7 @@ It should be useful for most firmware, depending on what it supports, but it has
 - load/save sample-banks quickly (for swapping sets at a live show)
 - export as MIDI/WAV for use n other programs
 
-No soldering or assembly needed, just get a cheap [Freenove ESP32-S3 2.8"](https://store.freenove.com/products/fnk0104?variant=45040270213318) (FNK0104B.) It comes in other sizes too, but the firmware is made for this exact model (its screen, touch and SD pins). You might additionally need a USB power-splitter and/or a small USB hub, depending on what you are doing.
+No soldering or assembly needed, just get a cheap [Freenove ESP32-S3 2.8"](https://store.freenove.com/products/fnk0104?variant=45040270213318) (FNK0104B). The same board comes in 3.5" (FNK0104N) and 4" (FNK0104S), with bigger screens (both 480x320), and its own firmware here: the 4"'s is tried on one, the 3.5"'s (a different panel, its own pins) isn't yet. Other sizes and makes won't work: the firmware is made for these boards (their screen, touch and SD pins). You might additionally need a USB power-splitter and/or a small USB hub, depending on what you are doing.
 
 **Install it, and how to set it up:** <https://konsumer.github.io/fm1buddy/>
 
@@ -61,7 +61,9 @@ With [PlatformIO](https://platformio.org), the board on the computer (it's a USB
 host):
 
 ```sh
-pio run -e cyd-s3 -t upload
+pio run -e cyd-s3 -t upload     # the 2.8" (ILI9341)
+pio run -e cyd-s3-35 -t upload  # the 3.5" (ST77922 on QSPI, and its own pins)
+pio run -e cyd-s3-4 -t upload   # the 4" (ST7796)
 ```
 
 The app also runs on the desktop (SDL2: `brew install sdl2`), with pretend Wi-Fi, an FM-1 and a keyboard. It runs
@@ -69,6 +71,7 @@ headless from a script too, for screenshots:
 
 ```sh
 pio run -e sim && .pio/build/sim/program --fm1 --keys
+pio run -e sim-4 && .pio/build/sim-4/program --fm1 --keys  # at the 4"'s (and the 3.5"'s) screen size
 .pio/build/sim/program --headless --script "tap 24 142; wait 300; shot settings.bmp; quit"
 ```
 

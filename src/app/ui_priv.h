@@ -5,12 +5,11 @@
 
 #include <string>
 
+#include "hal.h"
 #include "settings.h"
 #include "sounds.h"
 #include "themes.h"
 
-#define SCREEN_W 320
-#define SCREEN_H 240
 #define RAIL_W 48
 #define PAGE_W (SCREEN_W - RAIL_W)
 #define HEAD_H 34

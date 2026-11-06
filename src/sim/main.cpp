@@ -38,8 +38,8 @@
 #include "ui.h"
 #include "ui_priv.h"
 
-#define W 320
-#define H 240
+#define W SCREEN_W
+#define H SCREEN_H
 
 static uint16_t fb[W * H];
 static bool dirty = true;

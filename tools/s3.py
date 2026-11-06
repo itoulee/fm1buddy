@@ -2,7 +2,7 @@
 # Drive the CYD-S3 over its USB serial port (the console in src/s3/main.cpp), for development:
 #
 #   tools/s3.py shot out.bmp     the screen, as a .bmp
-#   tools/s3.py tap X Y          touch it at X, Y (320x240, landscape)
+#   tools/s3.py tap X Y          touch it at X, Y (screen pixels: 320x240 on the 2.8", 480x320 on the 3.5" and 4")
 #   tools/s3.py drag X1 Y1 X2 Y2 slide a finger from X1, Y1 to X2, Y2 (to scroll)
 #   tools/s3.py log              print its log on the SD card (from when it was the USB host)
 #   tools/s3.py cat PATH         print a file on the SD card (fm1buddy/installs/3.txt); ls [PATH] lists a folder
