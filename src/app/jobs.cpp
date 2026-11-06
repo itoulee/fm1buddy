@@ -434,9 +434,88 @@ static uint8_t kindOf(const uint8_t* p, uint32_t s) {
   return MAP_FREE;
 }
 
+// --------------------------------------------------------------------------- the FM-1's own screen ---
+// While the loader runs, the FM-1 shows what's going on: a title and the percentage, what it's doing, and the same map
+// as here (its sectors in the theme's colors: screenColors). A sector's state there, one of these
+enum FmState : uint8_t { FM_UNREAD,
+                         FM_TO_WRITE,
+                         FM_WRITTEN,
+                         FM_DATA,
+                         FM_FREE,
+                         FM_NEVER,
+                         FM_BAD };
+static bool fmOn;
+static uint32_t fmColors[SCREEN_COLORS];
+static const char* fmTitle;
+static const char* fmWhat;
+static int fmFrom, fmSpan;  // a reading's percentages: from, and how many it takes up
+static uint32_t fmShown;    // when it was drawn last (hal::millis)
+
+static uint8_t fmState(int i) {
+  if (mapCheck[i] == CHECK_BAD) {
+    return FM_BAD;
+  }
+  switch (mapMark[i]) {
+    case MARK_DIFFERS:
+      return FM_TO_WRITE;
+    case MARK_WRITTEN:
+      return FM_WRITTEN;
+  }
+  switch (mapKind[i]) {
+    case MAP_HEAD:
+    case MAP_KEEP:
+      return FM_NEVER;
+    case MAP_DATA:
+      return FM_DATA;
+    case MAP_FREE:
+      return FM_FREE;
+  }
+  return FM_UNREAD;
+}
+
+// its screen on (after uboot::enter or attach): the FM-1's panel, or the SMK-37's
+static void fmStart(bool smk, const char* title) {
+  screenColors(fmColors);
+  fmTitle = title;
+  fmWhat = "";
+  fmShown = 0;
+  fmOn = uboot::screenInit(smk, fmColors, SCREEN_LOADER_COLORS);
+}
+
+// the title and how far (percent < 0: none), what it's doing, and the map. At most every 200 ms, unless now
+static void fmShow(const char* what, int percent, bool now = false) {
+  if (!fmOn || (!now && hal::millis() - fmShown < 200)) {
+    return;
+  }
+  fmShown = hal::millis();
+  fmWhat = what;
+  char line[24];
+  if (percent >= 0) {
+    snprintf(line, sizeof line, "%s %d%%", fmTitle, std::min(percent, 100));
+  } else {
+    snprintf(line, sizeof line, "%s", fmTitle);
+  }
+  uint8_t states[MAP_SECTORS];
+  for (int i = 0; i < MAP_SECTORS; i++) {
+    states[i] = fmState(i);
+  }
+  fmOn = uboot::screenRow(0, fmColors[SCREEN_TEXT], fmColors[0], line) &&
+         uboot::screenRow(1, fmColors[SCREEN_DIM], fmColors[0], what) && uboot::screenMap(states);
+  if (!fmOn) {
+    hal::log("jobs: the FM-1's screen stopped taking it");
+  }
+}
+
+// a reading of the flash from here on: what it says, and its part of the percentage
+static void fmReading(const char* what, int from, int span) {
+  fmWhat = what, fmFrom = from, fmSpan = span;
+  fmShow(what, from, true);
+}
+
 // (uboot::read's progress)
 static void mapProgress(uint32_t d, uint32_t t) {
   progress(d, t);
+  fmShow(fmWhat, fmFrom + (int)(t ? (uint64_t)d * fmSpan / t : fmSpan), d >= t);
   if (!mapBuf || mapBuf->size() < d) {
     return;
   }
@@ -472,26 +551,6 @@ static void mapSmk(const std::vector<uint8_t>& flash) {
     mapKind[SMK_CAL / SECTOR] = MAP_KEEP;
     mapSeq++;
   }
-}
-
-// JieLi's loader: once, from jl-uboot-tool
-static bool getLoader() {
-  if (uboot::haveLoader()) {
-    return true;
-  }
-  if (!joinSaved()) {
-    return false;
-  }
-  step = FETCHING;
-  int code = hal::get(UBOOT_LOADER_URL, catalog::path(UBOOT_LOADER).c_str(), 0, progress, error);
-  if (code != 200 || !uboot::haveLoader()) {
-    remove(catalog::path(UBOOT_LOADER).c_str());
-    if (code == 200 || error.empty()) {
-      error = "JieLi's loader didn't download as it should.";
-    }
-    return false;
-  }
-  return true;
 }
 
 // a flash as backups/fm1-N-FW.bin (its name into saved), and what it was (fm1-N-FW.txt). FW: the firmware it ran
@@ -556,9 +615,6 @@ static void backupJob(void*) {
     return finish(false);
   }
   mkdirs();
-  if (!getLoader()) {
-    return finish(false);
-  }
   const Fm1Id* id = fm1::known(device);
   std::string was = id ? id->text : "";
   step = BOOT_LOADER;
@@ -567,18 +623,23 @@ static void backupJob(void*) {
   const char* e = uboot::enter(device, chip);
   std::vector<uint8_t> a, b;
   if (!e) {
+    fmStart(id && isSmk(id->model), "BACKUP");
     step = READING_FLASH;
     reading = 1;
+    fmReading("READING", 0, 50);
     e = mapRead(chip, a, 0);
     mapSmk(a);
   }
   if (!e) {
     reading = 2;
+    fmReading("READING IT AGAIN", 50, 50);
     e = mapRead(chip, b, &a);
     if (!e && a != b) {
       e = "It read differently twice: try again.";
     }
   }
+  fmShow(e ? "FAILED" : "DONE", e ? -1 : 100, true);
+  fmOn = false;
   step = LEAVING;
   uboot::leave();
   for (uint32_t start = hal::millis(); uboot::stuck() && hal::millis() - start < 3000;) {
@@ -626,9 +687,6 @@ static void prepareJob(void*) {
     return finish(false);
   }
   mkdirs();
-  if (!getLoader()) {
-    return finish(false);
-  }
   hal::save(RECOVER_KEY, recoverFrom, sizeof recoverFrom);
   hal::save(RECOVER_CAL_KEY, &recoverCal, 1);
   finish(true);
@@ -727,13 +785,16 @@ static void recoverJob(void*) {
     e = "That isn't the FM-1's chip: nothing was written.";
   }
   if (!e) {
+    fmStart(forSmk, "RECOVERY");
     step = READING_FLASH;
     reading = 1;
+    fmReading("READING", 0, 30);
     e = mapRead(chip, now, 0);
     mapSmk(now);
   }
   // the flash as it was, first: whatever happens next, it's on the SD card
   if (!e) {
+    fmShow("SAVING A BACKUP", 30, true);
     step = SAVING;
     e = saveBackup(now, chip, "before recovery", true) ? 0 : error.c_str();
   }
@@ -790,6 +851,9 @@ static void recoverJob(void*) {
     for (uint32_t a : sectors) {
       mapAt = a / SECTOR;
       mapSeq++;
+      char what[24];
+      snprintf(what, sizeof what, "WRITING %u/%u", (unsigned)done + 1, (unsigned)sectors.size());
+      fmShow(what, 30 + (int)(40 * done / sectors.size()), true);
       for (int t = 0; t < 3; t++) {
         e = uboot::writeSector(a, &expect[a]);
         if (!e) {
@@ -812,11 +876,14 @@ static void recoverJob(void*) {
   if (!e) {
     step = CHECKING_FLASH;
     reading = 2;
+    fmReading("CHECKING", 70, 30);
     e = mapRead(chip, back, &expect);
     if (!e && back != expect) {
       e = "It reads back differently from what was written.";
     }
   }
+  fmShow(e ? "FAILED" : "DONE", e ? -1 : 100, true);
+  fmOn = false;
   step = LEAVING;
   uboot::leave();
   if (e) {

@@ -19,6 +19,7 @@
 
 #include "board.h"
 #include "hal.h"
+#include "jobs.h"
 
 static bool sdOk, logToSd, computer, disk, recovery;
 // USB disk mode (hal.h): set, then a restart. Kept across that restart only (a power cycle starts as ever)
@@ -326,7 +327,7 @@ void board::loop() {
     }
   }
   flushLog();
-  if (hostTestUntil && (int32_t)(millis() - hostTestUntil) >= 0) {
+  if (hostTestUntil && (int32_t)(millis() - hostTestUntil) >= 0 && !jobs::running) {  // (not in a job's middle)
     hal::log("usb: the test is over: restarting");
     esp_restart();
   }
