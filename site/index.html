@@ -35,12 +35,12 @@
           <p class="note">Only need to swap firmware or rescue a bricked FM-1? <a href="https://konsumer.js.org/lilfm1buddy/">lilfm1buddy</a> is a lighter alternative: a cheaper board with no screen, using the FM-1's own screen and controls.</p>
           <h2>You need</h2>
           <ul>
-            <li>the Freenove ESP32-S3 Display, in any of its three touch sizes: 2.8" (<strong>FNK0104B</strong>; the A has no touch), 3.5" (<strong>FNK0104N</strong>) or 4" (<strong>FNK0104S</strong>). The printed case is only for the 2.8", and the 3.5"'s firmware is new: not tried on one here yet</li>
+            <li>the Freenove ESP32-S3 Display, in any of its three touch sizes: 2.8" (<strong>FNK0104B</strong>; the A has no touch), 3.5" (<strong>FNK0104N</strong>) or 4" (<strong>FNK0104S</strong>). The 3.5"'s firmware is new: not tried on one here yet</li>
             <li>a <strong>USB-C OTG adapter with a charging port</strong> (USB-C plug; a USB-A socket and a USB-C charging socket) that passes charging and data <em>at the same time</em>. Look for one sold for the <strong>Chromecast with Google TV</strong>: it's the same situation, a device that is the USB host while it's powered through that port. Many 3-port "splitters" can't: they say "does not support charging and data at the same time". <br />Or a hub with a power input made for the Chromecast or Fire TV (USB-C plug, USB-A ports, a charging port): the adapter and the hub in one.</li>
             <li>a small USB hub (the adapter powers it)</li>
             <li>a USB-C charger or a power bank</li>
             <li>a microSD card (FAT32)</li>
-            <li><em>Optional:</em> a flat 3.7 V LiPo for the battery case, up to 68 &times; 52 &times; 11 mm: a 3000 mAh cell like <a href="https://www.amazon.com/dp/B08T6GT7DV">MakerFocus's 4-pack</a> (65 &times; 36 &times; 10 mm, 1.25 mm plug). Any plug is fine: the board comes with a cable for its <code>BAT</code> socket, with bare wires</li>
+            <li><em>Optional:</em> a flat 3.7 V LiPo for the battery case, up to 70 &times; 51 mm under the 2.8" (86 &times; 55 under the 3.5", 96 &times; 62 under the 4"), any thickness: a 3000 mAh cell like <a href="https://www.amazon.com/dp/B08T6GT7DV">MakerFocus's 4-pack</a> (65 &times; 36 &times; 10 mm, 1.25 mm plug). Any plug is fine: the board comes with a cable for its <code>BAT</code> socket, with bare wires</li>
             <li>Chrome or Edge on a computer, and a USB-C cable that carries data</li>
           </ul>
           <h2>Install</h2>
@@ -98,6 +98,12 @@ FM-1 ───────┘                 │
             </div>
             <div>
               <p>Print the base open side up and the lid flat side down, without supports (PLA or PETG). The lid snaps on and holds the board down. The SD card goes in at the side.</p>
+              <div class="board-switch maker-board" role="radiogroup" aria-label="the board's screen">
+                <button type="button" role="radio" aria-checked="true" data-board="s3">2.8"</button>
+                <button type="button" role="radio" aria-checked="false" data-board="s3-35">3.5"</button>
+                <button type="button" role="radio" aria-checked="false" data-board="s3-4">4"</button>
+              </div>
+              <p class="note">The 3.5"'s and the 4"'s cases are made from their boards' drawings, and not printed yet: tell us how they fit (<a href="https://github.com/konsumer/fm1buddy/issues">an issue</a>, with a photo).</p>
               <p class="note">With a battery, it goes under the board, on its <code>BAT</code> socket (MX1.25, 2 pins). Pick yours, or type its size (the cell's own, from its listing: room is added), and the base is made for it, here in your browser. Red must go to + on the board: some batteries come wired the other way, so check before plugging it in. It stays connected, so it charges whenever the charger is in, and the board can sleep by itself when nothing is going on: pick how soon in Settings &gt; Sleep (it's off at first), and touch the screen to wake it.</p>
               <div class="maker-presets"></div>
               <div class="maker-size">

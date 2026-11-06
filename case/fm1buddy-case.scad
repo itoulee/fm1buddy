@@ -1,16 +1,18 @@
-// The fm1buddy case for the CYD-S3 (Freenove FNK0104B, ESP32-S3 2.8"): snap-fit, no screws, printed without supports
-// (base: open side up; lid: top side down).
+// The fm1buddy case for the CYD-S3 (Freenove ESP32-S3 Display: the 2.8" FNK0104B, the 3.5" FNK0104N or the 4"
+// FNK0104S): snap-fit, no screws, printed without supports (base: open side up; lid: top side down).
 //
+//   board    which one: "2.8", "3.5" or "4"
 //   battery  room for a flat LiPo under the board (switch_hole: and a hole for a slide switch in its lead)
 //   part     base, lid, or preview (the case open, with a stand-in for the board)
 //
-// openscad -D 'part="lid"' -o lid.stl fm1buddy-case.scad (tools/cases.sh makes them all)
+// openscad -D 'board="4"' -D 'part="lid"' -o lid.stl fm1buddy-case.scad (tools/cases.sh makes them all)
 //
-// The board's size is from LCDwiki's ES3C28P outline drawing (the same board): 86 x 50, holes 3.2 at 4 from its edges
-// (5.6 pads), parts up to 4.7 under it, the display and touch panel 4.3 (+-0.2) over it. x from its USB-C end, y across it, z up
-// from the floor.
+// The boards' sizes are from LCDwiki's outline drawings of the same boards: the ES3C28P (2.8"), the ES3C35P (3.5") and
+// the ES3C40P (4"). Holes 3.2, the display and touch panel over the board, parts under it. x from its USB-C end, y
+// across it, z up from the floor.
 
 /* [What] */
+board = "2.8";  // [2.8, 3.5, 4]
 battery = false;
 button_holes = false;  // holes in the floor to reach BOOT and RESET with a paperclip
 part = "preview";  // [preview, base, lid]
@@ -38,18 +40,31 @@ PCB = 1.6;
 eps = 0.01;
 
 // ---------------------------------------------------------------------------------------------- board ---
-// the CYD-S3, face up: x from its USB-C end, y from the long edge with the mic (the SD card, BAT and BOOT are on the
-// other). USB-C, BOOT, RESET, the SD socket and the RGB LED are on its back
-S3 = [86, 50];
-S3_HOLES = [[4, 4], [82, 4], [4, 46], [82, 46]];
-S3_FRONT = 4.3;                                              // the display and touch panel, above its board
+// the CYD-S3, face up: x from its USB-C end, y from the long edge away from the SD card (the card goes in through the
+// other one). USB-C, BOOT, RESET, the SD socket and the RGB LED are on its back. Each value: the 2.8"'s, the 3.5"'s,
+// the 4"'s
+function pick(a28, a35, a4) = board == "3.5" ? a35 : board == "4" ? a4 : a28;
+assert(board == "2.8" || board == "3.5" || board == "4", "board: \"2.8\", \"3.5\" or \"4\"");
+S3 = pick([86, 50], [101.5, 54.5], [112.21, 61.04]);
+S3_HOLES = pick(
+  [[4, 4], [82, 4], [4, 46], [82, 46]],
+  [[3.5, 3.3], [98, 3.3], [3.5, 51.2], [98, 51.2]],
+  [[4, 4], [108.21, 4], [4, 57.04], [108.21, 57.04]]);
+S3_FRONT = pick(4.3, 4.2, 4.85);                             // the display and touch panel, above its board
 FRONT_CLEAR = 0.5;                                           // over them to the lid (their tolerance: the lid sits on the walls, not them)
-S3_BACK = 4.7;                                               // its tallest parts underneath
-S3_WIN = [[16.0, 2.6], [76.0, 47.4]];                        // the window: visible area 58.05 x 43.6 at x 17 .. 75
-S3_USB = [25, 3.2];                                          // its USB-C: y of the middle, height under the board
-S3_BTN = [[3.26, 36.57], [3.26, 13.44]];                     // BOOT, RESET
-S3_SD = 50.97;                                               // the card goes in through the y = 50 edge, here
-S3_LED = [44.6, 17.6];
+S3_BACK = pick(4.7, 4.7, 5);                                 // its tallest parts underneath
+S3_GLASS = pick([8.4, 69.2], [9.25, 83], [8.82, 94.57]);     // the glass along x: where it starts, how long (it's as wide as the board)
+// the window: the visible area, 1 more along x and 0.6 across (2.8": 58.05 x 43.6 at x 17 .. 75; 3.5": 74.44 x 49.96
+// at x 16.16; 4": 83.82 x 55.98 at x 17.07)
+S3_WIN = pick([[16.0, 2.6], [76.0, 47.4]], [[15.16, 1.67], [91.6, 52.83]], [[16.07, 1.93], [101.89, 59.11]]);
+S3_USB = [S3.y / 2, 3.2];                                    // its USB-C: y of the middle, height under the board
+S3_BTN = pick(                                               // BOOT, RESET
+  [[3.26, 36.57], [3.26, 13.44]],
+  [[3.26, 13.55], [3.26, 40.98]],
+  [[4.05, 43.52], [4.05, 16.52]]);
+S3_SD = pick(50.97, 70.28, 83.26);                           // the card goes in through the y = S3.y edge, here
+S3_LED = pick([44.6, 17.6], [55, 6.5], [73.3, 31.4]);
+BAT_MAX = pick([72, 53], [88, 57], [98, 64]);                // the most room for a battery: between the posts, wall to wall
 
 // ------------------------------------------------------------------------------------------- shapes ---
 module rbox(p0, p1, r = 1.5) {
@@ -120,9 +135,9 @@ s_bz = (battery ? bat.z + 0.7 : 0) + S3_BACK + 0.8;           // the board's und
 s_inner_h = s_bz + PCB + S3_FRONT + FRONT_CLEAR;
 sc0 = [-gap, -gap - 1.5];
 sc1 = [S3.x + gap, S3.y + gap + 1.5];
-// the battery's corner: in the middle, clear of the posts (x 7 .. 79) and the paperclip holes, wall to wall across
+// the battery's corner: in the middle, clear of the posts and the paperclip holes, wall to wall across
 s_bat = [S3.x / 2 - bat.x / 2, S3.y / 2 - bat.y / 2];
-assert(!battery || (bat.x <= 72 && bat.y <= 53), "the battery is too big: 72 x 53 at most");
+assert(!battery || (bat.x <= BAT_MAX.x && bat.y <= BAT_MAX.y), str("the battery is too big: ", BAT_MAX.x, " x ", BAT_MAX.y, " at most"));
 
 module s3_base() {
   usb_z = s_bz - S3_USB.y / 2;
@@ -162,7 +177,7 @@ module s3_lid() {
 // ---------------------------------------------------------------------------------------- previews ---
 module stand_in() {
   translate([0, 0, s_bz]) color("#222") cube([S3.x, S3.y, PCB]);
-  translate([8.4, 0, s_bz + PCB]) color("#111") cube([69.2, S3.y, S3_FRONT - 0.2]);
+  translate([S3_GLASS[0], 0, s_bz + PCB]) color("#111") cube([S3_GLASS[1], S3.y, S3_FRONT - 0.2]);
   translate([-0.3, S3_USB.x - 4.5, s_bz - S3_USB.y]) color("#aaa") cube([7.3, 9, S3_USB.y]);
   translate([S3_SD - 7, S3.y - 15, s_bz - 1.9]) color("#bbb") cube([14, 15, 1.9]);
   if (part != "view_board") battery_in();
