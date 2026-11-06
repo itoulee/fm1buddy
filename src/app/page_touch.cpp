@@ -114,6 +114,7 @@ static struct Track {
 } tracks[FINGERS];
 
 static lv_obj_t *surface, *dots[FINGERS], *readout, *pads[PADS];
+static lv_obj_t* chPick;  // the bar's channel: while its list is open over the surface, touches there are the list's
 static lv_timer_t* poller;
 
 static int surfaceH() {
@@ -268,8 +269,10 @@ static void poll(lv_timer_t*) {
       move(tracks[s], f[k], s);
     }
   }
+  static bool picking;  // the list was open: nothing new starts until every finger is up (the one that closed it too)
+  picking = (chPick && lv_dropdown_is_open(chPick)) || (picking && n > 0);
   for (int k = 0; k < n; k++) {
-    if (used[k] || f[k].y < BAR_H) {
+    if (used[k] || f[k].y < BAR_H || picking) {
       continue;
     }
     for (int s = 0; s < FINGERS; s++) {
@@ -297,7 +300,7 @@ static void gone(lv_event_t*) {
     lv_timer_delete(poller);
     poller = 0;
   }
-  surface = readout = 0;
+  surface = readout = chPick = 0;
   for (auto& d : dots) {
     d = 0;
   }
@@ -316,6 +319,13 @@ static void pickMode(lv_event_t* e) {
     saveCfg();
     go(touchPage);
   }
+}
+
+// a channel from the bar: what's held stops on the old one first (its note-offs go there)
+static void pickChannel(lv_event_t* e) {
+  endAll();
+  cfg.ch = (uint8_t)lv_dropdown_get_selected((lv_obj_t*)lv_event_get_target(e));
+  saveCfg();
 }
 
 static void routingOn(lv_event_t*) {
@@ -359,9 +369,19 @@ void ui::touchPage(lv_obj_t* page) {
     lv_obj_set_style_text_color(r, color(t.knob[1]), 0);
     lv_obj_set_style_pad_ver(r, 2, 0);
   } else {
-    char s[16];
-    snprintf(s, sizeof s, "ch %u", cfg.ch + 1);
-    label(gap, s, &lv_font_montserrat_14, t.dim);
+    // the channel, to change quickly (the mapping can send each one somewhere else)
+    std::string chans;
+    for (int i = 1; i <= 16; i++) {
+      chans += (i > 1 ? "\nch " : "ch ") + std::to_string(i);
+    }
+    chPick = lv_dropdown_create(gap);
+    lv_dropdown_set_options(chPick, chans.c_str());
+    lv_dropdown_set_selected(chPick, cfg.ch % 16);
+    lv_obj_set_size(chPick, 78, 26);
+    lv_obj_set_style_pad_ver(chPick, 3, 0);
+    lv_obj_set_style_pad_hor(chPick, 8, 0);
+    lv_obj_set_style_text_font(chPick, &lv_font_montserrat_14, 0);
+    lv_obj_add_event_cb(chPick, pickChannel, LV_EVENT_VALUE_CHANGED, 0);
   }
   lv_obj_t* gear = button(bar, LV_SYMBOL_SETTINGS, [](lv_event_t*) { go(touchSetupPage); });
   lv_obj_set_size(gear, 36, 26);

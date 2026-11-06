@@ -477,7 +477,7 @@ static void startOnPage(lv_obj_t* page) {
                                             "MIDI routing and devices",
                                             "The mapping's rules",
                                             "Play the screen: a pad for two fingers",
-                                            "Sounds and setups",
+                                            "Sounds, setups, backups",
                                             "The Firmware Hub's list (Wi-Fi)",
                                             "Play the screen: 16 pads"};
   int now = startPage();

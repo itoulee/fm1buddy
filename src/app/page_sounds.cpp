@@ -370,7 +370,7 @@ static void soundsTick() {
 
 void ui::soundsPage(lv_obj_t* page) {
   const Theme& t = theme();
-  header(page, "Sounds");
+  header(page, "Manager");
   lv_obj_t* body = scroller(page);
   lv_obj_set_style_pad_row(body, 4, 0);
   shownSeq = midi::seq;

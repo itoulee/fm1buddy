@@ -101,7 +101,7 @@ static void jobEnded() {
 static const sounds::Speaks* device(lv_obj_t* body) {
   const sounds::Speaks* s = soundsSpeaks();
   if (!s || !s->sloop || s->proto < 6) {
-    wrapped(body, devText("The FM-1 isn't running SLOOP 2.3 or later (or it went): see the Sounds page.").c_str(), theme().knob[0]);
+    wrapped(body, devText("The FM-1 isn't running SLOOP 2.3 or later (or it went): see the Manager page.").c_str(), theme().knob[0]);
     return 0;
   }
   return s;
@@ -111,7 +111,7 @@ static const sounds::Speaks* device(lv_obj_t* body) {
 static const sounds::Speaks* slotDevice(lv_obj_t* body) {
   const sounds::Speaks* s = soundsSpeaks();
   if (!s || !s->slots) {
-    wrapped(body, devText("The FM-1's firmware has no sample slots (or it went): see the Sounds page.").c_str(), theme().knob[0]);
+    wrapped(body, devText("The FM-1's firmware has no sample slots (or it went): see the Manager page.").c_str(), theme().knob[0]);
     return 0;
   }
   return s;
