@@ -1,4 +1,4 @@
-// Backup (from Settings): all of the FM-1's flash to the SD card, through its boot loader (uboot.h): the firmware, and
+// Backup (from Sounds): all of the FM-1's flash to the SD card, through its boot loader (uboot.h): the firmware, and
 // everything the firmwares keep on it. Only reading: nothing on the FM-1 changes
 #include <dirent.h>
 #include <stdio.h>
@@ -72,7 +72,7 @@ static lv_obj_t* wrapped(lv_obj_t* body, const char* text, uint32_t color) {
 
 void ui::backupPage(lv_obj_t* page) {
   const Theme& t = theme();
-  header(page, devText("Back up the FM-1").c_str(), settingsPage);
+  header(page, devText("Back up the FM-1").c_str(), soundsPage);
   lv_obj_t* body = scroller(page);
   lv_obj_set_style_pad_row(body, 4, 0);
   shownSeq = midi::seq;

@@ -1,4 +1,4 @@
-// Recovery (from Settings): an FM-1 whose firmware doesn't start, back to one that does. Its chip's boot loader (in its
+// Recovery (from Sounds): an FM-1 whose firmware doesn't start, back to one that does. Its chip's boot loader (in its
 // ROM: uboot.h) is woken by a key on the USB lines as it's switched on, so it has to be straight on fm1buddy's port,
 // not on the hub; the board restarts into recovery mode for it (hal.h recoveryModeSet), and out again when it's done
 #include <dirent.h>
@@ -39,7 +39,7 @@ static bool shownRunning;
 static void doneTapped(lv_event_t*) {
   hal::recoveryModeSet(false);  // (the board restarts, as it was)
   started = false;
-  go(SETTINGS, settingsPage);
+  go(SOUNDS, soundsPage);
 }
 
 static void againTapped(lv_event_t*) {
@@ -150,7 +150,7 @@ void ui::recoverPage(lv_obj_t* page) {
   tick = recoverTick;
 }
 
-// ------------------------------------------------------------------------------- from Settings ---
+// --------------------------------------------------------------------------------- from Sounds ---
 struct Choice {
   std::string path, name, what;
 };
@@ -234,13 +234,16 @@ static void startTick() {
 
 void ui::recoverStartPage(lv_obj_t* page) {
   const Theme& t = theme();
-  header(page, devText("Recover the FM-1").c_str(), settingsPage);
+  header(page, devText("Unbrick the FM-1").c_str(), soundsPage);
   lv_obj_t* body = scroller(page);
   lv_obj_set_style_pad_row(body, 4, 0);
-  wrapped(body, devText("For an FM-1 that doesn't start: a firmware or a backup goes back on it, through its chip's own boot loader.").c_str(),
+  wrapped(body,
+          devText("For an FM-1 that won't start (a blank or stuck screen, a failed install): a firmware or a backup goes "
+                  "back on it. To update a working one, use Firmware.")
+              .c_str(),
           &lv_font_montserrat_12, t.dim);
 
-  label(body, "Put on it", &lv_font_montserrat_14, t.text);
+  label(body, "Put back on it", &lv_font_montserrat_14, t.text);
   choices.clear();
   for (const Firmware& f : catalog::sd) {
     bool smk = isSmk(f.product.c_str());  // (it says what it's for: recovery checks the flash it finds)

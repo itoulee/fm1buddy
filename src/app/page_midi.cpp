@@ -139,6 +139,9 @@ void ui::midiPage(lv_obj_t* page) {
   lv_obj_set_style_pad_row(body, 4, 0);
   shownSeq = midi::seq;
 
+  // the touch controller first: the one to get right into
+  navRow(body, LV_SYMBOL_KEYBOARD "  Touch controller", "", touchPage, t.dim);
+
   // routing, and whether it starts at power-on
   switchRow(body, LV_SYMBOL_SHUFFLE "  MIDI routing", midi::routing, toggleRouting, &lv_font_montserrat_16);
   bool atBoot = false;
@@ -176,7 +179,6 @@ void ui::midiPage(lv_obj_t* page) {
   }
   char ps[64];
   play::summary(ps, sizeof ps);
-  navRow(body, LV_SYMBOL_KEYBOARD "  Touch controller", "", touchPage, t.dim);
   lv_obj_t* pr = navRow(body, LV_SYMBOL_LOOP "  Clock, arp", ps, playPage, t.dim);
   playDot = label(pr, LV_SYMBOL_BULLET, &lv_font_montserrat_16, t.off);
   lv_obj_move_to_index(playDot, 1);

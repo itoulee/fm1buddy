@@ -102,8 +102,8 @@ static void readTouch(lv_indev_t*, lv_indev_data_t* data) {
       display::fromScreen(x, y, px, py);
       x = (int16_t)px, y = (int16_t)py;
     }
-    data->point.x = x;
-    data->point.y = y;
+    data->point.x = lx = x;  // (and up there too: a dropdown's list picks where it's let go)
+    data->point.y = ly = y;
     data->state = LV_INDEV_STATE_PRESSED;
     return;
   }

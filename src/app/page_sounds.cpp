@@ -1,5 +1,7 @@
-// Sounds: the device (the FM-1, or anything on the hub), what its firmware speaks, recording what it sends, the
-// .syx files on the SD card (to look in, and send to it), and setups (what a firmware like fomajam shares)
+// Sounds: recording the FM-1's audio, backing all of its flash up and recovering it (it needn't be on the hub for
+// those: one that doesn't start isn't), then the device (the FM-1, or anything on the hub), what its firmware speaks,
+// recording what it sends, the .syx files on the SD card (to look in, and send to it), and setups (what a firmware like
+// fomajam shares)
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -72,6 +74,18 @@ static void pickDevice() {
     dev = best;
     devSerial = dev >= 0 && midi::dev(dev, v) ? v.serial : 0;
   }
+}
+
+// a row to another page: a name, a note on the right, and >
+static lv_obj_t* navRow(lv_obj_t* body, const char* name, const char* note, Builder to, uint32_t noteColor) {
+  const Theme& t = theme();
+  lv_obj_t* r = listRow(body, [](lv_event_t* e) { go((Builder)lv_event_get_user_data(e)); }, (void*)to);
+  label(r, name, &lv_font_montserrat_16, t.text);
+  lv_obj_t* v = line(r, note, &lv_font_montserrat_12, noteColor);
+  lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_set_flex_grow(v, 1);
+  label(r, LV_SYMBOL_RIGHT, &lv_font_montserrat_14, t.dim);
+  return r;
 }
 
 static void finishRecording(bool keep) {
@@ -356,7 +370,7 @@ static void soundsTick() {
 
 void ui::soundsPage(lv_obj_t* page) {
   const Theme& t = theme();
-  header(page, "Sounds");
+  header(page, "Manager");
   lv_obj_t* body = scroller(page);
   lv_obj_set_style_pad_row(body, 4, 0);
   shownSeq = midi::seq;
@@ -369,13 +383,10 @@ void ui::soundsPage(lv_obj_t* page) {
   }
   pickDevice();
 
-  // recording the FM-1's sound
-  lv_obj_t* rr = listRow(body, [](lv_event_t*) { go(recordPage); }, 0);
-  label(rr, LV_SYMBOL_AUDIO "  Record audio", &lv_font_montserrat_16, t.text);
-  lv_obj_t* rv = line(rr, record::recording() ? "recording" : "", &lv_font_montserrat_12, t.knob[0]);
-  lv_obj_set_style_text_align(rv, LV_TEXT_ALIGN_RIGHT, 0);
-  lv_obj_set_flex_grow(rv, 1);
-  label(rr, LV_SYMBOL_RIGHT, &lv_font_montserrat_14, t.dim);
+  // recording the FM-1's sound; all of its flash to the SD card, and back on one that doesn't start
+  navRow(body, LV_SYMBOL_AUDIO "  Record audio", record::recording() ? "recording" : "", recordPage, t.knob[0]);
+  navRow(body, devText(LV_SYMBOL_SAVE "  Back up the FM-1").c_str(), "", backupPage, t.dim);
+  navRow(body, LV_SYMBOL_WARNING "  Unbrick", devText("FM-1 won't start?").c_str(), recoverStartPage, t.dim);
 
   // the device
   std::string opts;
@@ -440,30 +451,19 @@ void ui::soundsPage(lv_obj_t* page) {
 
     // what more it can do, by its firmware
     if (asked && speaks.sloop && speaks.proto >= 6) {
-      lv_obj_t* r = listRow(body, [](lv_event_t*) { go(sloopPage); }, 0);
-      label(r, LV_SYMBOL_SAVE "  SLOOP", &lv_font_montserrat_16, t.text);
-      lv_obj_t* v = line(r, "backups, projects, samples", &lv_font_montserrat_12, t.dim);
-      lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_RIGHT, 0);
-      lv_obj_set_flex_grow(v, 1);
-      label(r, LV_SYMBOL_RIGHT, &lv_font_montserrat_14, t.dim);
+      navRow(body, LV_SYMBOL_SAVE "  SLOOP", "backups, projects, samples", sloopPage, t.dim);
     } else if (asked && speaks.slots) {  // Felucca, and the firmwares built on it that kept its sample slots
-      lv_obj_t* r = listRow(body, [](lv_event_t*) { go(slotsPage); }, 0);
-      label(r, LV_SYMBOL_AUDIO "  Samples", &lv_font_montserrat_16, t.text);
-      lv_obj_t* v = line(r, "its sample slots", &lv_font_montserrat_12, t.dim);
-      lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_RIGHT, 0);
-      lv_obj_set_flex_grow(v, 1);
-      label(r, LV_SYMBOL_RIGHT, &lv_font_montserrat_14, t.dim);
+      navRow(body, LV_SYMBOL_AUDIO "  Samples", "its sample slots", slotsPage, t.dim);
     } else if (asked && fm1::candidate(dev)) {
-      const char* hint = speaks.sloop     ? "Backups, projects and sample slots need SLOOP 2.3 or later: update it from "
+      std::string hint = speaks.sloop     ? "Backups, projects and sample slots need SLOOP 2.3 or later: update it from "
                                             "Firmware (the Hub has it)."
                          : speaks.felucca ? devText(
                                                 "SLOOP (on the Hub) adds backups and projects you can load from here. "
-                                                "Settings > Back up the FM-1 saves all of its flash with any firmware.")
-                                                .c_str()
-                         : speaks.share   ? 0
-                                          : devText("Settings > Back up the FM-1 saves all of its flash, with any firmware.").c_str();
-      if (hint) {
-        lv_obj_t* l = label(body, hint, &lv_font_montserrat_12, t.dim);
+                                                "Back up the FM-1 (above) saves all of its flash, with any firmware.")
+                         : speaks.share   ? ""
+                                          : devText("Back up the FM-1 (above) saves all of its flash, with any firmware.");
+      if (!hint.empty()) {
+        lv_obj_t* l = label(body, hint.c_str(), &lv_font_montserrat_12, t.dim);
         lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
         lv_obj_set_width(l, LV_PCT(100));
       }
@@ -472,7 +472,7 @@ void ui::soundsPage(lv_obj_t* page) {
     // record; its voice
     lv_obj_t* row = box(body, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(row, 6, 0);
-    lv_obj_t* rec = button(row, recording ? LV_SYMBOL_STOP " Save" : LV_SYMBOL_PLAY " Record", recordTapped);
+    lv_obj_t* rec = button(row, recording ? LV_SYMBOL_STOP " Save" : LV_SYMBOL_PLAY " Record SysEx", recordTapped);
     if (recording) {
       lv_obj_add_state(rec, LV_STATE_CHECKED);
       button(row, "Cancel", cancelTapped);
@@ -487,7 +487,7 @@ void ui::soundsPage(lv_obj_t* page) {
         lv_obj_add_state(b, LV_STATE_DISABLED);
       }
     }
-    const char* about = recording ? "" : "Record keeps whatever SysEx it sends (start a dump from its menu), as a .syx.";
+    const char* about = recording ? "" : "Record SysEx keeps the SysEx it sends (start a dump from its menu), as a .syx.";
     recLabel = label(body, about, &lv_font_montserrat_12, recording ? t.accent : t.dim);
     lv_label_set_long_mode(recLabel, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(recLabel, LV_PCT(100));
