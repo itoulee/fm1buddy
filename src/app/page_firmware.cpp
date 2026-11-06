@@ -529,7 +529,7 @@ static void detailPage(lv_obj_t* page) {
                          &lv_font_montserrat_12, t.knob[1]);
     lv_label_set_long_mode(bl, LV_LABEL_LONG_WRAP);
     lv_obj_set_flex_grow(bl, 1);
-    button(br, LV_SYMBOL_SAVE " Back up", [](lv_event_t*) { go(SETTINGS, backupPage); });
+    button(br, LV_SYMBOL_SAVE " Back up", [](lv_event_t*) { go(SOUNDS, backupPage); });
   }
 
   if (!sel.what.empty()) {
