@@ -14,6 +14,7 @@
 
 #include "fm1.h"
 #include "hal.h"
+#include "mflr_loader.h"
 #include "midi.h"
 #include "sloopfmt.h"
 
@@ -678,7 +679,8 @@ bool fake::storage(const uint8_t* cdb, uint8_t cdbLen, bool in, uint8_t* buf, ui
   }
   uint32_t addr = be32(2), n = cdb[6] << 8 | cdb[7];
   if (cmd == 0xFB06 && !in && !ub.loaderRunning) {  // WRITE_MEMORY: the loader, piece by piece
-    if (n != len || ubCrc(buf, len, 0) != (cdb[9] | cdb[10] << 8) || addr != 0x1C02000u + ub.loaderGot) {
+    if (n != len || ubCrc(buf, len, 0) != (cdb[9] | cdb[10] << 8) || addr != 0x1C20000u + ub.loaderGot ||
+        ub.loaderGot + len > 0x8000) {
       hal::log("fake fm-1: boot loader: a bad piece of the loader");
       return false;
     }
@@ -686,6 +688,13 @@ bool fake::storage(const uint8_t* cdb, uint8_t cdbLen, bool in, uint8_t* buf, ui
     return true;
   }
   if (!in || len != 16) {
+    if (cmd == 0xFC44 && !in && ub.loaderRunning && len <= 20) {  // the screen: a row of text
+      hal::log("fake fm-1: screen row %u: %.*s", cdb[2], (int)len, (const char*)buf);
+      return true;
+    }
+    if (cmd == 0xFC47 && !in && ub.loaderRunning && len == 256) {  // the screen: the sector map
+      return true;
+    }
     if (cmd == 0xFD05 && in && ub.loaderRunning && addr + len <= ub.flash.size() && n == len) {  // READ_FLASH
       memcpy(buf, &ub.flash[addr], len);
       *got = len;
@@ -710,13 +719,13 @@ bool fake::storage(const uint8_t* cdb, uint8_t cdbLen, bool in, uint8_t* buf, ui
   buf[0] = cdb[0], buf[1] = cdb[1];
   *got = 16;
   if (cmd == 0xFB08 && !ub.loaderRunning) {  // JUMP: to the loader, all of it there
-    if (addr != 0x1C02000u || ub.loaderGot != 24064) {
+    if (addr != 0x1C20000u || ub.loaderGot != MFLR_LOADER_LEN) {
       hal::log("fake fm-1: boot loader: jumped to nothing (%u bytes there)", (unsigned)ub.loaderGot);
       ubootLeave();  // (the chip resets)
       return false;
     }
     ub.loaderRunning = true;
-    hal::log("fake fm-1: boot loader: JieLi's loader running");
+    hal::log("fake fm-1: boot loader: the loader running");
     return true;
   }
   if (!ub.loaderRunning) {
@@ -740,8 +749,16 @@ bool fake::storage(const uint8_t* cdb, uint8_t cdbLen, bool in, uint8_t* buf, ui
     memset(&ub.flash[addr], 0xFF, 0x1000);
     return true;
   }
-  if (cmd == 0xFC0C) {  // RUN_APP: its firmware again
-    hal::log("fake fm-1: boot loader: back to its firmware");
+  if (cmd == 0xFC43) {  // the screen on: the FM-1's (1) or the SMK-37's (2)
+    buf[2] = cdb[2] == 1 || cdb[2] == 2;
+    hal::log("fake fm-1: screen on (panel %u)", cdb[2]);
+    return true;
+  }
+  if (cmd == 0xFC49) {  // the screen's colors
+    return true;
+  }
+  if (cmd == 0xFC48) {  // the chip's reset: its firmware again
+    hal::log("fake fm-1: loader: reset, back to its firmware");
     ubootLeave();
     return true;
   }

@@ -7,12 +7,13 @@
 #include <thread>
 
 #include "hal.h"
+#include "mflr_loader.h"
 #include "midi.h"
 
 #define VID 0x4C4A
 #define PID 0x8057
-#define LOADER_SIZE 24064
-#define LOADER_AT 0x1C02000u
+#define LOADER_AT 0x1C20000u  // where it links (loader/build.sh), and is run: the first of its two 32 KiB slots
+#define LOADER_MAX 0x8000u
 #define IO 512
 
 // the ROM's
@@ -24,8 +25,13 @@
 #define ERASE_SECTOR 0xFB01
 #define READ_KEY 0xFC09
 #define GET_ONLINE_DEVICE 0xFC0A
-#define RUN_APP 0xFC0C
 #define GET_USB_BUFFER 0xFC14
+// the loader's screen (loader/src/loader.c)
+#define SCREEN_INIT 0xFC43
+#define SCREEN_ROW 0xFC44
+#define SCREEN_MAP 0xFC47
+#define RESET 0xFC48
+#define SCREEN_PALETTE 0xFC49
 
 static void wait(uint32_t ms) {
   std::this_thread::sleep_for(std::chrono::milliseconds(ms));
@@ -79,16 +85,7 @@ static bool exec(uint16_t cmd, const uint8_t* args, int n, uint8_t resp[16], int
   return false;
 }
 
-bool uboot::haveLoader() {
-  char hex[65];
-  std::string p = catalog::path(UBOOT_LOADER);
-  return !p.empty() && hal::sha256(p.c_str(), hex) && !strcmp(hex, UBOOT_LOADER_SHA256);
-}
-
 const char* uboot::enter(int d, Chip& chip) {
-  if (!haveLoader()) {
-    return "JieLi's loader isn't on the SD card.";
-  }
   // alone on the hub: the FM-1 doesn't take the key with another full-speed device there
   for (int o = 0; o < MIDI_USB; o++) {
     midi::Dev v;
@@ -118,15 +115,7 @@ const char* uboot::enter(int d, Chip& chip) {
 }
 
 const char* uboot::attach(Chip& chip) {
-  std::vector<uint8_t> loader(LOADER_SIZE);
-  FILE* f = haveLoader() ? fopen(catalog::path(UBOOT_LOADER).c_str(), "rb") : 0;
-  bool got = f && fread(loader.data(), 1, LOADER_SIZE, f) == LOADER_SIZE;
-  if (f) {
-    fclose(f);
-  }
-  if (!got) {
-    return "JieLi's loader isn't on the SD card.";
-  }
+  static_assert(MFLR_LOADER_LEN <= LOADER_MAX, "the loader doesn't fit its slot");
   for (uint32_t start = hal::millis(); !hal::storageThere(VID, PID);) {
     if (hal::millis() - start > 10000) {
       return hal::storageSeen(VID, PID) ? "Its boot loader came, but fm1buddy couldn't open it."
@@ -150,21 +139,24 @@ const char* uboot::attach(Chip& chip) {
     return "Its boot loader didn't answer.";
   }
   hal::log("uboot: %.8s %.16s %.4s", (const char*)inq + 8, (const char*)inq + 16, (const char*)inq + 32);
-  // the loader into its RAM (as it comes: already ciphered), and run
-  for (uint32_t off = 0; off < LOADER_SIZE; off += IO) {
-    uint32_t n = std::min<uint32_t>(IO, LOADER_SIZE - off);
+  // the loader into its RAM, a piece at a time, ciphered as the ROM deciphers what it's given; and run
+  uint8_t piece[IO];
+  for (uint32_t off = 0; off < MFLR_LOADER_LEN; off += IO) {
+    uint32_t n = std::min<uint32_t>(IO, MFLR_LOADER_LEN - off);
+    memcpy(piece, MFLR_LOADER + off, n);
+    cipher(piece, n);
     uint8_t args[9], cdb[16];
     be32(args, LOADER_AT + off);
     args[4] = n >> 8, args[5] = n & 0xFF, args[6] = 0;
-    uint16_t c = crc16(&loader[off], n, 0);
+    uint16_t c = crc16(piece, n, 0);
     args[7] = c & 0xFF, args[8] = c >> 8;
     cdbOf(cdb, WRITE_MEMORY, args, sizeof args);
     bool ok = false;
     for (int t = 0; t < 3 && !ok; t++) {  // (the same piece again: the same RAM)
-      ok = hal::storageCommand(cdb, 16, false, &loader[off], n, 0, 2000);
+      ok = hal::storageCommand(cdb, 16, false, piece, n, 0, 2000);
     }
     if (!ok) {
-      return "Its boot loader didn't take JieLi's loader.";
+      return "Its boot loader didn't take the loader.";
     }
   }
   // run it; it's running when it answers READ_KEY (the jump's own answer may be lost, and the loader doesn't know
@@ -179,14 +171,17 @@ const char* uboot::attach(Chip& chip) {
     running = exec(READ_KEY, key, 4, resp);
   }
   if (!running) {
-    return "JieLi's loader didn't start.";
+    return "The loader didn't start.";
   }
   uint8_t k[2] = {resp[7], resp[6]};  // its answer's 4th and 5th, the other way round, deciphered
   cipher(k, 2);
   chip.key = k[0] | k[1] << 8;
+  if (chip.key != FM1_KEY && (resp[7] | resp[6] << 8) == FM1_KEY) {
+    chip.key = FM1_KEY;  // (as it comes, not ciphered)
+  }
   if (!exec(GET_ONLINE_DEVICE, 0, 0, resp)) {
     leave();
-    return "JieLi's loader didn't say what flash it has.";
+    return "The loader didn't say what flash it has.";
   }
   chip.flashId = resp[4] | resp[5] << 8 | resp[6] << 16 | (uint32_t)resp[7] << 24;
   uint8_t cap = chip.flashId & 0xFF;  // JEDEC: its size, as a power of 2
@@ -297,14 +292,56 @@ const char* uboot::writeSector(uint32_t addr, const uint8_t* data) {
   return 0;
 }
 
+// ---- the loader's screen ----
+static uint16_t rgb565(uint32_t c) {
+  return (c >> 8 & 0xF800) | (c >> 5 & 0x07E0) | (c >> 3 & 0x001F);
+}
+
+bool uboot::screenInit(bool smk, const uint32_t* colors, int n) {
+  uint8_t args[14], resp[16];
+  // the palette first (the screen is cleared to its background): up to 6 colors a command, from index at
+  for (int at = 0; at < n; at += 6) {
+    int k = std::min(6, n - at);
+    memset(args, 0, sizeof args);
+    args[0] = at;
+    for (int i = 0; i < k; i++) {
+      uint16_t c = rgb565(colors[at + i]);
+      args[1 + 2 * i] = c >> 8, args[2 + 2 * i] = c & 0xFF;
+    }
+    exec(SCREEN_PALETTE, args, 1 + 2 * k, resp, 2, 1000);
+  }
+  args[0] = smk ? 2 : 1;
+  bool ok = exec(SCREEN_INIT, args, 1, resp, 2, 3000) && resp[2] == 1;
+  hal::log("uboot: the FM-1's screen: %s", ok ? "on" : "it didn't come");
+  return ok;
+}
+
+bool uboot::screenRow(int row, uint32_t fg, uint32_t bg, const char* text) {
+  uint32_t n = std::min<size_t>(strlen(text), 20);  // (a row is 20 characters)
+  uint16_t f = rgb565(fg), b = rgb565(bg);
+  uint8_t args[7] = {(uint8_t)row, (uint8_t)(f >> 8), (uint8_t)f, (uint8_t)(b >> 8), (uint8_t)b, (uint8_t)(n >> 8),
+                     (uint8_t)n};
+  uint8_t cdb[16];
+  cdbOf(cdb, SCREEN_ROW, args, sizeof args);
+  return hal::storageCommand(cdb, 16, false, (uint8_t*)text, n, 0, 1000);
+}
+
+bool uboot::screenMap(const uint8_t states[256]) {
+  uint8_t args[7] = {0, 0, 0, 0, 0, 1, 0};  // (the length it declares: 256, a byte a sector)
+  uint8_t cdb[16];
+  cdbOf(cdb, SCREEN_MAP, args, sizeof args);
+  return hal::storageCommand(cdb, 16, false, (uint8_t*)states, 256, 0, 1000);
+}
+
 void uboot::leave() {
   if (!hal::storageThere(VID, PID)) {
     return;
   }
-  uint8_t args[4], resp[16];
-  be32(args, 1);
-  exec(RUN_APP, args, 4, resp, 2, 500);  // (it may restart before it answers)
-  hal::log("uboot: back to its firmware");
+  // the chip's own reset, as switching it off and on is: its ROM then starts the firmware. Its answer may be lost: the
+  // chip is restarting
+  uint8_t resp[16];
+  exec(RESET, 0, 0, resp, 1, 500);
+  hal::log("uboot: reset: back to its firmware");
 }
 
 bool uboot::stuck() {

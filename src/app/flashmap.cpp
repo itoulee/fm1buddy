@@ -1,5 +1,7 @@
 // The flash map (jobs.h): the FM-1's 1 MiB flash as 16 x 16 sectors of 4 KiB, in the theme's colors, as a backup or a
 // recovery reads and writes it. Drawn in one go (not 256 objects), again whenever the map changes
+#include <string.h>
+
 #include <algorithm>
 
 #include "jobs.h"
@@ -31,32 +33,45 @@ static int distance(uint32_t a, uint32_t b) {
   return r * r + g * g + bl * bl;
 }
 
+static void rolesOf(const Theme& t, uint32_t out[ROLES]) {
+  uint32_t taken[ROLES + 1] = {t.accent};
+  int n = 1;
+  bool used[4] = {};
+  for (int want = 0; want < ROLES; want++) {
+    int best = -1, bestFar = -1;
+    for (int k = 0; k < 4; k++) {  // the knob farthest from everything taken so far
+      if (used[k]) {
+        continue;
+      }
+      int far = 1 << 30;
+      for (int i = 0; i < n; i++) {
+        far = std::min(far, distance(t.knob[k], taken[i]));
+      }
+      if (far > bestFar) {
+        best = k, bestFar = far;
+      }
+    }
+    used[best] = true;
+    out[want] = taken[n++] = t.knob[best];
+  }
+}
+
 static uint32_t role(int r) {
   const Theme& t = theme();
   if (rolesFor != &t) {
     rolesFor = &t;
-    uint32_t taken[ROLES + 1] = {t.accent};
-    int n = 1;
-    bool used[4] = {};
-    for (int want = 0; want < ROLES; want++) {
-      int best = -1, bestFar = -1;
-      for (int k = 0; k < 4; k++) {  // the knob farthest from everything taken so far
-        if (used[k]) {
-          continue;
-        }
-        int far = 1 << 30;
-        for (int i = 0; i < n; i++) {
-          far = std::min(far, distance(t.knob[k], taken[i]));
-        }
-        if (far > bestFar) {
-          best = k, bestFar = far;
-        }
-      }
-      used[best] = true;
-      roles[want] = taken[n++] = t.knob[best];
-    }
+    rolesOf(t, roles);
   }
   return roles[r];
+}
+
+// the same for the FM-1's own screen (jobs.h): from the job's thread, so worked out here, not from role's
+void jobs::screenColors(uint32_t rgb[SCREEN_COLORS]) {
+  const Theme& t = theme();
+  uint32_t r[ROLES];
+  rolesOf(t, r);
+  uint32_t c[SCREEN_COLORS] = {t.bg, t.off, r[TO_WRITE], r[WRITTEN], t.accent, t.beat, r[NEVER], t.text, t.text, t.dim};
+  memcpy(rgb, c, sizeof c);
 }
 
 static uint32_t kindColor(uint8_t k) {

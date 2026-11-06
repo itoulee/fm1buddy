@@ -102,6 +102,8 @@ src/s3/    the board: screen, touch, SD, Wi-Fi, USB host (TinyUSB), Bluetooth MI
 src/sim/   the simulator
 site/      the installer page (GitHub Pages, with the latest release)
 case/      the 3D-printed case (OpenSCAD); tools/cases.sh makes its STLs
+loader/    the flash loader that runs in the FM-1's RAM for backups and recovery, and draws on its screen
+           (m-bootloader's, MIT): loader/build.sh builds it into src/app/mflr_loader.h, loader/test.sh tests it
 ```
 
 ## License

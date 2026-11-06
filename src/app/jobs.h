@@ -24,7 +24,7 @@ enum Kind { NONE,
             RESTORE,          // a setup back to it
             EXPORT,           // a setup's patterns as MIDI files, its kits as .wav files
             BACKUP,           // all of the FM-1's flash to the SD card (through its boot loader: uboot.h)
-            PREPARE,          // recovery: JieLi's loader on the SD card, then the board restarts into recovery mode
+            PREPARE,          // recovery: what goes on it is kept, then the board restarts into recovery mode
             RECOVER,          // recovery mode: a firmware or a backup onto the FM-1, through its boot loader
             SLOOP_BACKUP,     // SLOOP: a backup of it, in SLOOP's file (sloop.h)
             SLOOP_RESTORE,    // SLOOP: a backup onto it (backed up first)
@@ -73,6 +73,15 @@ extern std::atomic<int> mapAt;         // the sector being read or written now (
 extern std::atomic<bool> mapChecking;  // reading it again: what isn't checked yet is still to be
 extern std::atomic<uint32_t> mapSeq;   // goes up as the map changes
 
+// the map's colors, the theme's (flashmap.cpp), for the FM-1's own screen while the loader runs (0xRRGGBB): the
+// background, a sector's (not read, to write, written, firmware and data, erased, never written, read back wrong), then
+// text and dim text. The loader takes the first SCREEN_LOADER_COLORS
+#define SCREEN_COLORS 10
+#define SCREEN_LOADER_COLORS 8
+#define SCREEN_TEXT 8
+#define SCREEN_DIM 9
+void screenColors(uint32_t rgb[SCREEN_COLORS]);
+
 extern std::atomic<int> kind, step;
 extern std::atomic<bool> running;
 extern std::atomic<uint32_t> finished;     // counts the jobs that have ended
@@ -102,8 +111,8 @@ bool keep(int d);
 bool restore(int d, const std::string& setup);  // in /setups
 bool exportSetup(const std::string& setup, const char* app);
 bool backup(int d);  // device d: the FM-1
-// recovery: what goes on the FM-1 (a .fwsc in /fm1, or a backup's .bin in /backups) is kept, JieLi's loader is
-// downloaded if it isn't there, and the board restarts into recovery mode
+// recovery: what goes on the FM-1 (a .fwsc in /fm1, or a backup's .bin in /backups) is kept, and the board restarts
+// into recovery mode
 bool prepare(const std::string& from);
 std::string recovering();  // what's going on it ("" if nothing)
 // RECOVER failed because the device's calibration sector is blank and the backup has one: it may be an SMK-37 whose

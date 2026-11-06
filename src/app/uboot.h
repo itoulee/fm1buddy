@@ -1,8 +1,10 @@
 // The FM-1's boot loader: it's in the chip's ROM (JieLi WL82), so no firmware can break it. A running FM-1 goes there
 // when it's sent F0 22 24 35 7D F7 (stock V15, and the firmwares on Felucca's platform: fomajam ...), and it's then a
 // USB storage device (4C4A:8057, "WL80UBOOT1.00") answering JieLi's own commands, until it's told to start its
-// firmware again. With JieLi's loader in its RAM (wl82loader.bin, from jl-uboot-tool: downloaded once, to the SD
-// card) it reads the whole flash: the firmware, and what the firmwares keep (settings, projects, samples, voices).
+// firmware again. With our loader in its RAM (loader/: m-bootloader's, MIT, in the board's program as mflr_loader.h,
+// so there's nothing to download) it reads the whole flash: the firmware, and what the firmwares keep (settings,
+// projects, samples, voices). The loader also draws on the FM-1's own screen as it goes: two rows of text, and the
+// flash as 16 x 16 sectors, in the theme's colors.
 //
 // An FM-1 whose firmware doesn't start gets there by the key its chip listens for when it's switched on (hal.h
 // recoveryMode), and then has a firmware or a backup written back (recovery: writeSector); backups only read.
@@ -18,17 +20,9 @@
 
 #include "catalog.h"
 
-#define UBOOT_LOADER DATA_DIR "/wl82loader.bin"
-#define UBOOT_LOADER_URL                                                                                    \
-  "https://raw.githubusercontent.com/kagaimiq/jl-uboot-tool/c32b28e7a04f873f526ba929cb1bae9f05442fe9/data/" \
-  "loaderblobs/usb/wl82loader.bin"
-#define UBOOT_LOADER_SHA256 "d41da6126760c9d66660bcc0cac8d27d221806c5e369a8036921efe68dca5376"
 #define BACKUPS_DIR "/backups"
 
 namespace uboot {
-// the loader is on the SD card (and is the one it should be)
-bool haveLoader();
-
 struct Chip {
   uint16_t key;      // its chip key (0x980F)
   uint32_t flashId;  // its flash's JEDEC id (0x856014, 0xB36014 or 0xEB6014: 1 MiB)
@@ -41,8 +35,15 @@ const char* enter(int d, Chip& chip);
 const char* attach(Chip& chip);
 // the whole flash; 0 or an error
 const char* read(const Chip& chip, std::vector<uint8_t>& out, void (*progress)(uint32_t done, uint32_t total));
-// the loader restarts the chip after about 3 s without a command: one to keep it (while the SD card is slow)
+// a command, to keep the loader there while the SD card is slow (JieLi's restarted the chip after about 3 s without one)
 void keepAlive();
+
+// The loader's own screen on the FM-1 (after enter or attach): 240 x 240, two rows of 20 characters (A-Z, 0-9 and
+// " -./:<>+?%"), and the flash's 256 sectors under them, each in one of the palette's colors. False if it didn't take it
+// the panel: the FM-1's (smk false) or the SMK-37's; colors: 0xRRGGBB, the background then a sector state's (up to 7)
+bool screenInit(bool smk, const uint32_t* colors, int n);
+bool screenRow(int row, uint32_t fg, uint32_t bg, const char* text);
+bool screenMap(const uint8_t states[256]);
 
 // Writing (recovery only): whole 4 KiB sectors, only in [WRITE_FROM, WRITE_TO). Below is the flash's head (its header,
 // the SPL, isd_config: what the chip starts from), above is key_mac; no firmware install writes either
@@ -64,7 +65,7 @@ static inline bool fm1Flash(uint32_t id) {
 bool smkFlash(const std::vector<uint8_t>& flash);  // (a whole flash, or a backup of one)
 // one sector: erased, written, and read back; 0 or an error
 const char* writeSector(uint32_t addr, const uint8_t* data);
-// back to its firmware (it restarts)
+// back to its firmware (the loader resets the chip)
 void leave();
 // it's still in its boot loader (after leave(): only switching it off and on gets it out)
 bool stuck();
