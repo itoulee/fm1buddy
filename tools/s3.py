@@ -7,7 +7,7 @@
 #   tools/s3.py log              print its log on the SD card (from when it was the USB host)
 #   tools/s3.py cat PATH         print a file on the SD card (fm1buddy/installs/3.txt); ls [PATH] lists a folder
 #   tools/s3.py host [SCRIPT]    restart it as the USB host for 40 s (then it's back here): to test that. SCRIPT runs
-#                                meanwhile, as the console can't: "tap X Y" and "wait MS" between ';'
+#                                meanwhile, as the console can't: "tap X Y", "drag X1 Y1 X2 Y2" and "wait MS" between ';'
 #   tools/s3.py disk             restart it as a USB disk for this computer: prints where its SD card is mounted
 #   tools/s3.py eject            eject that disk: it comes back here by itself (waits for its serial port)
 #   tools/s3.py usbmidi          restart it as a USB MIDI device for this computer (Settings > On a computer)

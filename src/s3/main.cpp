@@ -257,14 +257,21 @@ static void script() {
   static const char* at;
   static uint32_t next;
   if (!at) {
+    if (!*board::hostTestScript()) {
+      return;  // (none, or the USB host isn't up yet: it's there once it is)
+    }
     at = board::hostTestScript();
     next = millis() + 1000;  // (the app settles first)
   }
   if (!*at || (int32_t)(millis() - next) < 0) {
     return;
   }
-  int x, y, ms, n = 0;
-  if (sscanf(at, " tap %d %d%n", &x, &y, &n) == 2) {
+  int x, y, x2, y2, ms, n = 0;
+  if (sscanf(at, " drag %d %d %d %d%n", &x, &y, &x2, &y2, &n) == 4) {
+    tapX = x, tapY = y, toX = x2, toY = y2, dragAt = millis(), tapUntil = dragAt + 400;
+    next = millis() + 700;
+    hal::log("test: drag %d %d %d %d", x, y, x2, y2);
+  } else if (sscanf(at, " tap %d %d%n", &x, &y, &n) == 2) {
     tapX = x, tapY = y, dragAt = 0, tapUntil = millis() + 80;
     next = millis() + 300;
     hal::log("test: tap %d %d", x, y);
