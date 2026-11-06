@@ -67,6 +67,36 @@ h1 {
   color: var(--dim);
 }
 
+.oss {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 16px 0 0;
+}
+
+.oss a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--fg);
+  color: var(--bg);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.oss a:hover {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.oss span {
+  color: var(--dim);
+  font-size: 0.9rem;
+}
+
 .release {
   display: inline-block;
   margin: 16px 0 0;
