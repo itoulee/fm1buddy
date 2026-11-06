@@ -66,15 +66,20 @@ void playPage(lv_obj_t* page);    // clock, arpeggiator, chords
 void mapPage(lv_obj_t* page);     // the mapping's rules
 void mapAddPage(lv_obj_t* page);  // a new rule
 void touchPage(lv_obj_t* page);   // the touch controller (all of the screen)
-// the page fm1buddy starts on (Settings): its tab and page
-enum Start { START_FIRMWARE,
+// the page fm1buddy starts on (Settings): its tab and page. Kept as a number: new ones go at the end
+enum Start { START_FIRMWARE,  // the SD card's firmwares (no Wi-Fi needed)
              START_MIDI,
              START_MAPPING,
-             START_TOUCH,
+             START_TOUCH,  // the touch controller's X/Y pad
              START_SOUNDS,
+             START_HUB,   // the Hub's firmwares
+             START_PADS,  // the touch controller's pads
              STARTS };
 extern const char* const START_NAMES[STARTS];
+extern const Start START_ORDER[STARTS];  // as the list shows them
 int startPage();
+void firmwareSource(bool hub);  // the firmware page's list: the Hub's, or the SD card's
+void touchMode(bool pads);      // the touch controller: its pads, or its X/Y pad
 // going to sleep after this many minutes with nothing going on (0: never; Settings > Sleep)
 #define SLEEPS 4
 extern const uint8_t SLEEP_MINUTES[SLEEPS];
