@@ -39,10 +39,16 @@ std::string path(const std::string& p);
 bool parseHub(std::vector<Firmware>& out, std::string& updated, std::string& err);
 // the list from HUB_LIST, in a moment: false if it isn't there
 bool loadHub(std::vector<Firmware>& out, std::string& updated);
-// the files in /fm1, with what the Hub's list knows about them; marks the Hub's that are there
+// the files in /fm1, with what the Hub's list knows about them; marks the Hub's that are there. Quick: it reads no
+// whole file (a sha256 not known yet is read in the background: hashSd)
 void scanSd();
-// the same into sd, with the Hub's list hub (marked where it's on the card): from another thread
-void scanSdInto(std::vector<Firmware>& hub, std::vector<Firmware>& sd);
+// the same into sd, with the Hub's list hub (marked where it's on the card): from another thread. Returns how many
+// files have no sha256 yet
+int scanSdInto(std::vector<Firmware>& hub, std::vector<Firmware>& sd);
+// read the sha256 of the files that don't have one yet, on a thread of its own (once at a time)
+void hashSd();
+// true once after hashSd learned something: time to scanSd again
+bool sdHashed();
 // the device a package is for, from its own header ("FM-1_974"), "" if it isn't a package
 std::string product(const char* path);
 }  // namespace catalog

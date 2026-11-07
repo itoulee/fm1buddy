@@ -2,6 +2,7 @@
 
 #include <ArduinoJson.h>
 #include <dirent.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,6 +10,8 @@
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <atomic>
+#include <mutex>
 
 #include "fm1.h"
 #include "hal.h"
@@ -129,6 +132,7 @@ static void writeList(const std::vector<Firmware>& list, const std::string& upda
   std::string p = catalog::path(HUB_LIST);
   FILE* f = fopen((p + ".part").c_str(), "w");
   if (!f) {
+    hal::log("hub: can't write %s.part (errno %d)", HUB_LIST, errno);
     return;
   }
   fprintf(f, "%s\t", LIST_HEAD);
@@ -146,10 +150,14 @@ static void writeList(const std::vector<Firmware>& list, const std::string& upda
     field(f, kinds, '\n');
   }
   bool ok = !ferror(f);
-  fclose(f);
-  if (ok) {
-    remove(p.c_str());
-    rename((p + ".part").c_str(), p.c_str());
+  ok = !fclose(f) && ok;
+  if (!ok) {
+    hal::log("hub: writing %s.part failed (errno %d)", HUB_LIST, errno);
+    return;
+  }
+  remove(p.c_str());
+  if (rename((p + ".part").c_str(), p.c_str())) {
+    hal::log("hub: can't rename %s.part (errno %d)", HUB_LIST, errno);
   }
 }
 
@@ -344,41 +352,12 @@ static const struct {
 // each file's sha256, kept on the card by its name, size and time (so each is read once): "name size mtime sha256"
 #define SHA_CACHE DATA_DIR "/sd-sha256.txt"
 
-static std::string cachedSha(const std::string& full, const char* name, const struct stat& st,
-                             std::vector<std::string>& cache, bool& changed) {
-  char key[300];
-  snprintf(key, sizeof key, "%s %lu %lu ", name, (unsigned long)st.st_size, (unsigned long)st.st_mtime);
-  for (auto& line : cache) {
-    if (line.size() == strlen(key) + 64 && line.compare(0, strlen(key), key) == 0) {
-      return line.substr(strlen(key));
-    }
-  }
-  char hex[65];
-  if (!hal::sha256(full.c_str(), hex)) {
-    return "";
-  }
-  cache.push_back(std::string(key) + hex);
-  changed = true;
-  return hex;
-}
+// the ones read since power-on, too (so a card that can't be written isn't read again and again)
+static std::mutex knownMu;
+static std::vector<std::string> known;
 
-static bool isPkg(const char* name) {
-  size_t n = strlen(name);
-  return name[0] != '.' && n > 5 && !strcasecmp(name + n - 5, ".fwsc");
-}
-
-void catalog::scanSdInto(std::vector<Firmware>& hub, std::vector<Firmware>& sd) {
-  sd.clear();
-  for (Firmware& h : hub) {
-    h.onSd = false;
-  }
-  std::string dir = path(FW_DIR);
-  DIR* d = dir.empty() ? 0 : opendir(dir.c_str());
-  if (!d) {
-    return;
-  }
-  std::vector<std::string> cache, kept;
-  if (FILE* c = fopen(path(SHA_CACHE).c_str(), "r")) {
+static void readCache(std::vector<std::string>& cache) {
+  if (FILE* c = fopen(catalog::path(SHA_CACHE).c_str(), "r")) {
     char line[400];
     while (fgets(line, sizeof line, c)) {
       line[strcspn(line, "\r\n")] = 0;
@@ -386,7 +365,65 @@ void catalog::scanSdInto(std::vector<Firmware>& hub, std::vector<Firmware>& sd) 
     }
     fclose(c);
   }
-  bool changed = false;
+  std::lock_guard<std::mutex> l(knownMu);
+  cache.insert(cache.end(), known.begin(), known.end());
+}
+
+static std::string cacheKey(const char* name, const struct stat& st) {
+  char key[300];
+  snprintf(key, sizeof key, "%s %lu %lu ", name, (unsigned long)st.st_size, (unsigned long)st.st_mtime);
+  return key;
+}
+
+// the cached sha256 of a file, "" if it isn't known yet
+static std::string cachedSha(const std::string& key, const std::vector<std::string>& cache) {
+  for (auto& line : cache) {
+    if (line.size() == key.size() + 64 && line.compare(0, key.size(), key) == 0) {
+      return line.substr(key.size());
+    }
+  }
+  return "";
+}
+
+static bool writeCache(const std::vector<std::string>& lines) {
+  mkdir(catalog::path(DATA_DIR).c_str(), 0777);
+  std::string p = catalog::path(SHA_CACHE);
+  FILE* c = fopen(p.c_str(), "w");
+  if (!c) {
+    hal::log("sd: can't write %s (errno %d)", SHA_CACHE, errno);
+    return false;
+  }
+  for (auto& line : lines) {
+    fprintf(c, "%s\n", line.c_str());
+  }
+  bool ok = !ferror(c);
+  if (fclose(c) || !ok) {
+    hal::log("sd: writing %s failed (errno %d)", SHA_CACHE, errno);
+    return false;
+  }
+  return true;
+}
+
+static bool isPkg(const char* name) {
+  size_t n = strlen(name);
+  return name[0] != '.' && n > 5 && !strcasecmp(name + n - 5, ".fwsc");
+}
+
+static std::atomic<bool> hashing{false}, hashedNew{false};
+
+int catalog::scanSdInto(std::vector<Firmware>& hub, std::vector<Firmware>& sd) {
+  sd.clear();
+  for (Firmware& h : hub) {
+    h.onSd = false;
+  }
+  std::string dir = path(FW_DIR);
+  DIR* d = dir.empty() ? 0 : opendir(dir.c_str());
+  if (!d) {
+    return 0;
+  }
+  std::vector<std::string> cache;
+  readCache(cache);
+  int unknown = 0;
   while (dirent* e = readdir(d)) {
     if (!isPkg(e->d_name)) {
       continue;
@@ -396,12 +433,17 @@ void catalog::scanSdInto(std::vector<Firmware>& hub, std::vector<Firmware>& sd) 
     if (stat(full.c_str(), &st)) {
       continue;
     }
-    // what it is: by its sha256 (a Hub firmware, or one of M-VAVE's), not by its name
-    std::string sha = cachedSha(full, e->d_name, st, cache, changed);
-    kept.push_back(std::string(e->d_name) + " " + std::to_string((unsigned long)st.st_size) + " " +
-                   std::to_string((unsigned long)st.st_mtime) + " " + sha);
+    // what it is: by its sha256 (a Hub firmware, or one of M-VAVE's), not by its name. Until that's known (it's
+    // read in the background: hashSd), a Hub firmware by its file name and size (the install checks the sha256)
+    std::string sha = cachedSha(cacheKey(e->d_name, st), cache);
+    if (sha.empty()) {
+      unknown++;
+    }
     Firmware f;
-    auto h = std::find_if(hub.begin(), hub.end(), [&](const Firmware& x) { return !sha.empty() && !strcasecmp(x.sha256.c_str(), sha.c_str()); });
+    auto h = std::find_if(hub.begin(), hub.end(), [&](const Firmware& x) {
+      return sha.empty() ? x.size == (uint32_t)st.st_size && !strcasecmp(x.file.c_str(), e->d_name)
+                         : !strcasecmp(x.sha256.c_str(), sha.c_str());
+    });
     auto o = std::find_if(std::begin(OFFICIAL), std::end(OFFICIAL), [&](const auto& x) { return sha == x.sha256; });
     if (h != hub.end()) {
       h->onSd = true;
@@ -426,17 +468,72 @@ void catalog::scanSdInto(std::vector<Firmware>& hub, std::vector<Firmware>& sd) 
     sd.push_back(f);
   }
   closedir(d);
-  if (changed || kept.size() != cache.size()) {  // (only the files that are there now)
-    if (FILE* c = fopen(path(SHA_CACHE).c_str(), "w")) {
-      for (auto& line : kept) {
-        fprintf(c, "%s\n", line.c_str());
-      }
-      fclose(c);
-    }
-  }
   std::sort(sd.begin(), sd.end(), [](const Firmware& a, const Firmware& b) { return strcasecmp(a.name.c_str(), b.name.c_str()) < 0; });
+  return unknown;
+}
+
+// the sha256 of the files the cache doesn't know yet (seconds each), on a thread of their own; the cache is written as
+// it goes (so a restart meanwhile keeps what's done), and keeps only the files that are there
+static void hashTask(void*) {
+  uint32_t t = hal::millis();
+  std::string dir = catalog::path(FW_DIR);
+  std::vector<std::string> cache, kept;
+  readCache(cache);
+  int done = 0;
+  bool ok = true;
+  if (DIR* d = dir.empty() ? 0 : opendir(dir.c_str())) {
+    while (dirent* e = readdir(d)) {
+      if (!isPkg(e->d_name)) {
+        continue;
+      }
+      std::string full = dir + "/" + e->d_name;
+      struct stat st;
+      if (stat(full.c_str(), &st)) {
+        continue;
+      }
+      std::string key = cacheKey(e->d_name, st), sha = cachedSha(key, cache);
+      if (sha.empty()) {
+        char hex[65];
+        if (!hal::sha256(full.c_str(), hex)) {
+          continue;
+        }
+        sha = hex;
+        {
+          std::lock_guard<std::mutex> l(knownMu);
+          known.push_back(key + sha);
+        }
+        if (++done % 20 == 0 && ok) {
+          std::vector<std::string> sofar = kept;  // (the ones still to go keep their old lines)
+          sofar.push_back(key + sha);
+          sofar.insert(sofar.end(), cache.begin(), cache.end());
+          ok = writeCache(sofar);
+        }
+      }
+      kept.push_back(key + sha);
+    }
+    closedir(d);
+  }
+  if (ok && (done || kept.size() != cache.size())) {
+    ok = writeCache(kept);
+  }
+  hal::log("sd: %d sha256 read (%u ms), %u in the cache%s", done, (unsigned)(hal::millis() - t), (unsigned)kept.size(),
+           ok ? "" : ": not written");
+  hashedNew = hashedNew || done;
+  hashing = false;
+}
+
+void catalog::hashSd() {
+  if (!path(FW_DIR).empty() && !hashing.exchange(true)) {
+    hal::spawn(hashTask, 0, 8192);
+  }
+}
+
+bool catalog::sdHashed() {
+  return hashedNew.exchange(false);
 }
 
 void catalog::scanSd() {
-  scanSdInto(hub, sd);
+  if (scanSdInto(hub, sd)) {
+    hashSd();
+  }
 }

@@ -134,6 +134,7 @@ static void wifiSettings(lv_event_t*) {
 static std::vector<const Firmware*> filling;  // the rows still to make
 static size_t filled;
 static lv_timer_t* fillTimer;
+static int32_t keepY;  // the list made again (firmwareListAgain): where it was scrolled to, until it's back there
 
 static void fillRow(const Firmware* f) {
   const Theme& t = theme();
@@ -186,6 +187,13 @@ static void fillMore(lv_timer_t*) {
   for (; filled < end; filled++) {
     fillRow(filling[filled]);
   }
+  if (keepY) {
+    lv_obj_update_layout(list);
+    lv_obj_scroll_to_y(list, keepY, LV_ANIM_OFF);
+    if (lv_obj_get_scroll_y(list) >= keepY) {
+      keepY = 0;
+    }
+  }
   if (filled < filling.size()) {
     return;
   }
@@ -195,6 +203,7 @@ static void fillMore(lv_timer_t*) {
 static void fillList() {
   const Theme& t = theme();
   stopFill();
+  keepY = 0;
   lv_obj_clean(list);
   filling = shown();
   filled = 0;
@@ -223,6 +232,13 @@ static void fillList() {
   if (!filling.empty()) {
     fillTimer = lv_timer_create(fillMore, 16, 0);
   }
+}
+
+void ui::firmwareListAgain() {
+  int32_t y = lv_obj_get_scroll_y(list);
+  fillList();
+  keepY = y;
+  fillMore(0);
 }
 
 static void showStatus() {
