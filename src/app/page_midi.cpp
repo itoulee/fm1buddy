@@ -188,10 +188,10 @@ void ui::midiPage(lv_obj_t* page) {
   for (int d = 0; d < MIDI_DEVS; d++) {
     dots[d] = lasts[d] = dropLabels[d] = 0;
     midi::Dev v;
-    if (!midi::dev(d, v)) {
-      continue;
+    if (d == MIDI_TOUCH || !midi::dev(d, v)) {
+      continue;  // (the touch controller has its own row, up top)
     }
-    n += d != MIDI_TOUCH;
+    n++;
     counts[d] = v.count;
     lv_obj_t* r = listRow(body, 0, 0);
     dots[d] = label(r, LV_SYMBOL_BULLET, &lv_font_montserrat_20, t.off);
