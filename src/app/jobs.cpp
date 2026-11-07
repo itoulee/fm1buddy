@@ -31,7 +31,7 @@ std::atomic<uint32_t> mapSeq{0};
 bool ok;
 std::string error;
 std::vector<hal::Ap> aps;
-std::vector<Firmware> hub;
+FwList hub;
 std::string hubUpdated;
 int device = -1;
 sounds::Speaks speaks;

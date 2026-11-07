@@ -94,120 +94,179 @@ static int hubShows() {
   return m < 0 ? FM1 : m;
 }
 
-static bool forDevice(const Firmware& f) {
-  return machineOf(f.product) == hubShows();
+static const FwList& srcList() {
+  return source == SD ? catalog::sd : catalog::hub;
 }
 
-static std::vector<const Firmware*> shown() {
-  std::vector<const Firmware*> v;
-  for (const Firmware& f : source == SD ? catalog::sd : catalog::hub) {
-    if (source == HUB ? !forDevice(f) : sdMachine >= 0 && machineOf(f.product) != sdMachine) {
+static bool forDevice(const FwItem& f) {
+  return machineOf(catalog::hub.str(f.product)) == hubShows();
+}
+
+// the list's items to show, in order
+static std::vector<uint32_t> shown() {
+  const FwList& l = srcList();
+  std::vector<uint32_t> v;
+  uint32_t kind = 0;
+  for (size_t k = 0; k < l.kinds.size(); k++) {
+    if (l.kinds[k] == kindFilter) {
+      kind = 1u << k;
+    }
+  }
+  int machine = source == HUB ? hubShows() : sdMachine;
+  for (size_t i = 0; i < l.size(); i++) {
+    const FwItem& f = l[i];
+    if (machine >= 0 && machineOf(l.str(f.product)) != machine) {
       continue;
     }
-    if (source == SD || kindFilter.empty() || std::find(f.kinds.begin(), f.kinds.end(), kindFilter) != f.kinds.end()) {
-      v.push_back(&f);
+    if (source == SD || kindFilter.empty() || f.kinds & kind) {
+      v.push_back(i);
     }
   }
   if (source == HUB) {
-    std::stable_sort(v.begin(), v.end(), [](const Firmware* a, const Firmware* b) {
-      if (a->stock != b->stock)
-        return a->stock;  // M-VAVE's own first
-      if (sortBy == NEWEST && a->date != b->date)
-        return a->date > b->date;
-      return strcasecmp(a->name.c_str(), b->name.c_str()) < 0;
+    std::stable_sort(v.begin(), v.end(), [&](uint32_t i, uint32_t j) {
+      const FwItem &a = l[i], &b = l[j];
+      if ((a.flags & FwItem::STOCK) != (b.flags & FwItem::STOCK))
+        return (a.flags & FwItem::STOCK) != 0;  // M-VAVE's own first
+      int d = strcmp(l.str(a.date), l.str(b.date));
+      if (sortBy == NEWEST && d)
+        return d > 0;
+      return strcasecmp(l.str(a.name), l.str(b.name)) < 0;
     });
   }
   return v;
-}
-
-static void open(lv_event_t* e) {
-  sel = *(const Firmware*)lv_event_get_user_data(e);
-  go(detailPage);
 }
 
 static void wifiSettings(lv_event_t*) {
   go(SETTINGS, wifiPage);
 }
 
-// the list is made a few rows at a time (240 of them at once held the page for a second), while the spinner turns
-#define FILL_CHUNK 6
-static std::vector<const Firmware*> filling;  // the rows still to make
-static size_t filled;
-static lv_timer_t* fillTimer;
-static int32_t keepY;  // the list made again (firmwareListAgain): where it was scrolled to, until it's back there
+// the list rolls: a few rows (as many as it shows, and some), each showing the item it's scrolled to (row at goes in
+// slot at % slots), so the list costs the same however long it is
+#define SLOTS 16
+struct Slot {
+  lv_obj_t *row, *name, *sub, *kind, *tag, *machine;
+  int at;  // the row it shows, -1: none
+};
+static Slot slots[SLOTS];
+static int nSlots;
+static std::vector<uint32_t> rows;  // the items shown, in order
+static lv_obj_t* spacer;            // at the end: the list's height
+static lv_obj_t* srcButton[2];
+static uint32_t listChanges;  // FwList::changes when the list was made
 
-static void fillRow(const Firmware* f) {
+static void open(lv_event_t* e) {
+  const Slot& s = slots[(intptr_t)lv_event_get_user_data(e)];
+  if (s.at < 0 || (size_t)s.at >= rows.size() || rows[s.at] >= srcList().size()) {
+    return;
+  }
+  sel = catalog::details(srcList(), rows[s.at]);
+  go(detailPage);
+}
+
+static void makeSlot(int k) {
   const Theme& t = theme();
-  lv_obj_t* r = listRow(list, open, (void*)f);
-  lv_obj_t* left = box(r);
+  Slot& s = slots[k];
+  s.row = listRow(list, open, (void*)(intptr_t)k);
+  lv_obj_t* left = box(s.row);
   lv_obj_set_flex_grow(left, 1);
-  lv_obj_t* n = line(left, f->name.c_str(), &lv_font_montserrat_16, t.text);
-  lv_obj_set_width(n, LV_PCT(100));
-  std::string sub = f->author;
-  if (!f->version.empty()) {
-    sub += (sub.empty() ? "v" : "  v") + f->version;
-  }
-  if (sub.empty()) {
-    sub = f->product.empty() ? "not a firmware package" : f->product;
-  }
-  lv_obj_t* s = line(left, sub.c_str(), &lv_font_montserrat_12, t.dim);
-  lv_obj_set_width(s, LV_PCT(100));
-
-  lv_obj_t* right = box(r);
+  s.name = line(left, "", &lv_font_montserrat_16, t.text);
+  lv_obj_set_width(s.name, LV_PCT(100));
+  s.sub = line(left, "", &lv_font_montserrat_12, t.dim);
+  lv_obj_set_width(s.sub, LV_PCT(100));
+  lv_obj_t* right = box(s.row);
   lv_obj_set_width(right, LV_SIZE_CONTENT);
   lv_obj_set_flex_align(right, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-  if (!f->kinds.empty()) {
-    label(right, f->kinds[0].c_str(), &lv_font_montserrat_12, kindColor(f->kinds[0]));
-  }
+  s.kind = label(right, "", &lv_font_montserrat_12, t.dim);
   lv_obj_t* tags = box(right, LV_FLEX_FLOW_ROW);
   lv_obj_set_width(tags, LV_SIZE_CONTENT);
   lv_obj_set_style_pad_column(tags, 4, 0);
-  if (f->beta) {
-    label(tags, "beta", &lv_font_montserrat_12, t.knob[1]);
-  } else if (source == HUB && f->onSd) {
-    label(tags, LV_SYMBOL_SD_CARD, &lv_font_montserrat_12, t.accent);
-  }
-  int m = machineOf(f->product);
-  if (m >= 0) {
-    label(tags, MACHINE_NAMES[m], &lv_font_montserrat_12, m == FM1 ? t.dim : t.knob[3]);
+  s.tag = label(tags, "", &lv_font_montserrat_12, t.dim);
+  s.machine = label(tags, "", &lv_font_montserrat_12, t.dim);
+  s.at = -1;
+  lv_obj_add_flag(s.row, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void setLabel(lv_obj_t* l, const char* text, uint32_t c) {
+  lv_label_set_text(l, text);
+  lv_obj_set_style_text_color(l, color(c), 0);
+  if (*text) {
+    lv_obj_remove_flag(l, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
   }
 }
 
-static void stopFill() {
-  if (fillTimer) {
-    lv_timer_delete(fillTimer);
-    fillTimer = 0;
+static void fillSlot(Slot& s, int at) {
+  const Theme& t = theme();
+  const FwList& l = srcList();
+  const FwItem& f = l[rows[at]];
+  lv_label_set_text(s.name, l.str(f.name));
+  std::string sub = l.str(f.author);
+  if (*l.str(f.version)) {
+    sub += (sub.empty() ? "v" : "  v") + std::string(l.str(f.version));
   }
-  filling.clear();
-  filled = 0;
-}
-
-static void fillMore(lv_timer_t*) {
-  size_t end = filled + FILL_CHUNK < filling.size() ? filled + FILL_CHUNK : filling.size();
-  for (; filled < end; filled++) {
-    fillRow(filling[filled]);
+  if (sub.empty()) {
+    sub = *l.str(f.product) ? l.str(f.product) : "not a firmware package";
   }
-  if (keepY) {
-    lv_obj_update_layout(list);
-    lv_obj_scroll_to_y(list, keepY, LV_ANIM_OFF);
-    if (lv_obj_get_scroll_y(list) >= keepY) {
-      keepY = 0;
+  lv_label_set_text(s.sub, sub.c_str());
+  const char* kind = "";
+  for (size_t k = 0; k < l.kinds.size(); k++) {
+    if (f.kinds & 1u << k) {
+      kind = l.kinds[k].c_str();
+      break;
     }
   }
-  if (filled < filling.size()) {
+  setLabel(s.kind, kind, kindColor(kind));
+  if (f.flags & FwItem::BETA) {
+    setLabel(s.tag, "beta", t.knob[1]);
+  } else {
+    setLabel(s.tag, source == HUB && f.flags & FwItem::ON_SD ? LV_SYMBOL_SD_CARD : "", t.accent);
+  }
+  int m = machineOf(l.str(f.product));
+  setLabel(s.machine, m >= 0 ? MACHINE_NAMES[m] : "", m == FM1 ? t.dim : t.knob[3]);
+  lv_obj_set_pos(s.row, 0, at * ROW_H);
+  lv_obj_remove_flag(s.row, LV_OBJ_FLAG_HIDDEN);
+  s.at = at;
+}
+
+// the slots, for where the list is scrolled to
+static void place() {
+  if (!nSlots) {
     return;
   }
-  stopFill();
+  int first = lv_obj_get_scroll_y(list) / ROW_H - 1;
+  first = first < 0 ? 0 : first;
+  for (int at = first; at < first + nSlots; at++) {
+    Slot& s = slots[at % nSlots];
+    if ((size_t)at >= rows.size()) {
+      lv_obj_add_flag(s.row, LV_OBJ_FLAG_HIDDEN);
+      s.at = -1;
+    } else if (s.at != at) {
+      fillSlot(s, at);
+    }
+  }
+}
+
+static void showCounts() {
+  const char* names[] = {"SD card", "Hub"};
+  size_t counts[] = {catalog::sd.size(), (size_t)std::count_if(catalog::hub.items.begin(), catalog::hub.items.end(), forDevice)};
+  for (int i = 0; i < 2; i++) {
+    char s[32];
+    snprintf(s, sizeof s, counts[i] ? "%s  %u" : "%s", names[i], (unsigned)counts[i]);
+    if (srcButton[i]) {
+      lv_label_set_text(lv_obj_get_child(srcButton[i], 0), s);
+    }
+  }
 }
 
 static void fillList() {
   const Theme& t = theme();
-  stopFill();
-  keepY = 0;
+  listChanges = FwList::changes;
   lv_obj_clean(list);
-  filling = shown();
-  filled = 0;
-  if (filling.empty()) {
+  nSlots = 0;
+  spacer = 0;
+  rows = shown();
+  if (rows.empty()) {
     lv_obj_t* l = label(list, "", &lv_font_montserrat_14, t.dim);
     lv_obj_set_width(l, LV_PCT(100));
     lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
@@ -220,7 +279,7 @@ static void fillList() {
     } else if (!settings.ssid[0]) {
       lv_label_set_text(l, "Pick a Wi-Fi network in Settings to get the Firmware Hub's list.");
       lv_obj_t* b = button(list, LV_SYMBOL_WIFI "  Wi-Fi settings", wifiSettings);
-      lv_obj_set_style_margin_left(b, 12, 0);
+      lv_obj_set_pos(b, 12, 60);
     } else if (!jobs::running) {
       lv_label_set_text(l, !kindFilter.empty()    ? "None of that kind."
                            : catalog::hub.empty() ? "Nothing yet: tap " LV_SYMBOL_REFRESH " to get the list."
@@ -228,17 +287,26 @@ static void fillList() {
     }
     return;
   }
-  fillMore(0);  // (the first rows now: the page looks alive)
-  if (!filling.empty()) {
-    fillTimer = lv_timer_create(fillMore, 16, 0);
+  spacer = lv_obj_create(list);
+  lv_obj_remove_style_all(spacer);
+  lv_obj_set_size(spacer, 1, 1);
+  lv_obj_set_pos(spacer, 0, rows.size() * ROW_H - 1);
+  lv_obj_update_layout(list);
+  nSlots = lv_obj_get_height(list) / ROW_H + 3;
+  nSlots = nSlots > SLOTS ? SLOTS : nSlots;
+  for (int k = 0; k < nSlots; k++) {
+    makeSlot(k);
   }
+  place();
 }
 
 void ui::firmwareListAgain() {
   int32_t y = lv_obj_get_scroll_y(list);
   fillList();
-  keepY = y;
-  fillMore(0);
+  showCounts();
+  lv_obj_update_layout(list);
+  lv_obj_scroll_to_y(list, y, LV_ANIM_OFF);  // (LVGL stops it at the end)
+  place();
 }
 
 static void showStatus() {
@@ -249,6 +317,9 @@ static void showStatus() {
     hubMachine = -1;
     go(firmwarePage);  // an FM-1 or an SMK-37 came or went: the Hub's list is for it
     return;
+  }
+  if (FwList::changes != listChanges) {
+    firmwareListAgain();  // (the card's firmwares were read again)
   }
   const Theme& t = theme();
   bool busy = jobs::running && jobs::kind == jobs::HUB;
@@ -351,12 +422,8 @@ void ui::firmwarePage(lv_obj_t* page) {
   listFm1 = fm1Now();
   lv_obj_t* head = header(page, 0);
   lv_obj_set_style_pad_column(head, 4, 0);
-  const char* names[] = {"SD card", "Hub"};
-  size_t counts[] = {catalog::sd.size(), (size_t)std::count_if(catalog::hub.begin(), catalog::hub.end(), forDevice)};
   for (int i = 0; i < 2; i++) {
-    char s[32];
-    snprintf(s, sizeof s, counts[i] ? "%s  %u" : "%s", names[i], (unsigned)counts[i]);
-    lv_obj_t* b = button(head, s, pickSource, (void*)(intptr_t)i);
+    lv_obj_t* b = srcButton[i] = button(head, "", pickSource, (void*)(intptr_t)i);
     lv_obj_set_height(b, 30);
     lv_obj_set_flex_grow(b, 1);
     if (i == source) {
@@ -376,15 +443,16 @@ void ui::firmwarePage(lv_obj_t* page) {
     lv_obj_t* opts = box(page, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(opts, 4, 0);
     machineMenu(opts);
-    std::vector<std::string> kinds;
-    for (const Firmware& f : catalog::hub) {
-      if (!forDevice(f)) {
-        continue;
+    uint32_t bits = 0;
+    for (const FwItem& f : catalog::hub.items) {
+      if (forDevice(f)) {
+        bits |= f.kinds;
       }
-      for (const std::string& k : f.kinds) {
-        if (std::find(kinds.begin(), kinds.end(), k) == kinds.end()) {
-          kinds.push_back(k);
-        }
+    }
+    std::vector<std::string> kinds;
+    for (size_t k = 0; k < catalog::hub.kinds.size(); k++) {
+      if (bits & 1u << k) {
+        kinds.push_back(catalog::hub.kinds[k]);
       }
     }
     std::sort(kinds.begin(), kinds.end());
@@ -414,9 +482,13 @@ void ui::firmwarePage(lv_obj_t* page) {
     machineMenu(opts);
   }
   list = scroller(page);
-  lv_obj_add_event_cb(list, [](lv_event_t*) { stopFill(); }, LV_EVENT_DELETE, 0);  // (half-built: the page went)
+  lv_obj_set_layout(list, LV_LAYOUT_NONE);  // (the rows are where they're scrolled to: place)
+  lv_obj_add_event_cb(list, [](lv_event_t*) { place(); }, LV_EVENT_SCROLL, 0);
+  lv_obj_add_event_cb(
+      list, [](lv_event_t*) { nSlots = 0, srcButton[0] = srcButton[1] = 0; }, LV_EVENT_DELETE, 0);  // (the page went)
   status = line(page, "", &lv_font_montserrat_12, t.dim);
   lv_obj_set_width(status, LV_PCT(100));
+  showCounts();
 
   // the Hub's list, the first time it's looked at after power-on (not while Bluetooth MIDI runs: Wi-Fi would pause it)
   if (source == HUB && settings.hubAuto && !hubAsked && settings.ssid[0] && hal::sd() &&

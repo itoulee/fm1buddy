@@ -549,7 +549,7 @@ static void batteryWatch() {
 // at power-on, on a thread of their own (the screen answers meanwhile): the Hub's list (its short copy, catalog::loadHub,
 // in a moment; without one, the whole list, seconds, which writes the copy for next time), then the SD card's
 // firmwares. The UI's thread takes them once they're there (bootWatch)
-static std::vector<Firmware> bootHub, bootSd;
+static FwList bootHub, bootSd;
 static std::string bootUpdated;
 static std::atomic<bool> bootDone{false};
 static bool bootRunning;
@@ -588,8 +588,8 @@ static void bootWatch() {
     catalog::hubUpdated = bootUpdated;
     catalog::sd.swap(bootSd);
   }
-  std::vector<Firmware>().swap(bootHub);
-  std::vector<Firmware>().swap(bootSd);
+  FwList().swap(bootHub);
+  FwList().swap(bootSd);
   if (bootUnknown) {
     catalog::hashSd();
   }
@@ -612,7 +612,7 @@ static void watch(lv_timer_t*) {
     seenFinished = jobs::finished;
     if (jobs::ok && jobs::kind == jobs::HUB) {
       catalog::hub.swap(jobs::hub);
-      std::vector<Firmware>().swap(jobs::hub);  // the old list
+      FwList().swap(jobs::hub);  // the old list
       hubNew = true;
       catalog::hubUpdated = jobs::hubUpdated;
       catalog::scanSd();

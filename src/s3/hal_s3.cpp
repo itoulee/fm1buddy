@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <esp_crt_bundle.h>
 #include <esp_http_client.h>
+#include <ff.h>
 #include <mbedtls/platform.h>
 #include <mbedtls/sha256.h>
 #include <soc/rtc_cntl_reg.h>
@@ -645,6 +646,42 @@ bool hal::sha256(const uint8_t* p, size_t n, char hex[65]) {
     return false;
   }
   toHex(sum, hex);
+  return true;
+}
+
+// through FatFs: its directory entries have the size and time, where stat would search the folder for each file (the
+// card is its only volume: drive 0)
+bool hal::listDir(const char* path, void (*fn)(const char* name, uint32_t size, uint32_t mtime, void* arg), void* arg) {
+  if (strncmp(path, "/sdcard/", 8)) {
+    return false;
+  }
+  std::string p = std::string("0:") + (path + 7);
+  FF_DIR d;
+  FRESULT r = f_opendir(&d, p.c_str());
+  if (r != FR_OK) {
+    hal::log("sd: can't open %s (FatFs %d)", p.c_str(), (int)r);
+    return false;
+  }
+  FILINFO fi;
+  while ((r = f_readdir(&d, &fi)) == FR_OK && fi.fname[0]) {
+    if (fi.fattrib & AM_DIR) {
+      continue;
+    }
+    struct tm tm = {};  // (as ESP-IDF's stat makes st_mtime)
+    tm.tm_mday = fi.fdate & 0x1F;
+    tm.tm_mon = ((fi.fdate >> 5) & 0xF) - 1;
+    tm.tm_year = (fi.fdate >> 9) + 80;
+    tm.tm_sec = (fi.ftime & 0x1F) * 2;
+    tm.tm_min = (fi.ftime >> 5) & 0x3F;
+    tm.tm_hour = fi.ftime >> 11;
+    tm.tm_isdst = -1;
+    fn(fi.fname, fi.fsize, (uint32_t)mktime(&tm), arg);
+  }
+  f_closedir(&d);
+  if (r != FR_OK) {
+    hal::log("sd: reading %s stopped (FatFs %d)", p.c_str(), (int)r);
+    return false;
+  }
   return true;
 }
 
