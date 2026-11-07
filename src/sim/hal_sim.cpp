@@ -2,6 +2,7 @@
 // "wrong"), and the real internet through libcurl.
 #include <CommonCrypto/CommonDigest.h>
 #include <curl/curl.h>
+#include <dirent.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -277,6 +278,21 @@ bool hal::sha256(const uint8_t* p, size_t n, char hex[65]) {
   for (int i = 0; i < 32; i++) {
     sprintf(hex + i * 2, "%02x", sum[i]);
   }
+  return true;
+}
+
+bool hal::listDir(const char* path, void (*fn)(const char* name, uint32_t size, uint32_t mtime, void* arg), void* arg) {
+  DIR* d = opendir(path);
+  if (!d) {
+    return false;
+  }
+  while (dirent* e = readdir(d)) {
+    struct stat st;
+    if (!stat((std::string(path) + "/" + e->d_name).c_str(), &st) && S_ISREG(st.st_mode)) {
+      fn(e->d_name, st.st_size, st.st_mtime, arg);
+    }
+  }
+  closedir(d);
   return true;
 }
 

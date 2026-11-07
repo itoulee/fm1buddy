@@ -61,6 +61,9 @@ int get(const char* url, const char* path, std::string* etag, void (*progress)(u
         std::string& err);
 bool sha256(const char* path, char hex[65]);
 bool sha256(const uint8_t* p, size_t n, char hex[65]);
+// the files in a folder with their size and time (st_size, st_mtime as stat has them), from one read of the folder
+// (not a search of it a file): fn for each. false if it didn't read to its end
+bool listDir(const char* path, void (*fn)(const char* name, uint32_t size, uint32_t mtime, void* arg), void* arg);
 
 // USB: the port is the host (a hub on it, the FM-1 and controllers on the hub), or, when a computer is on it at
 // power-on, a serial port to the computer (for flashing and logs)

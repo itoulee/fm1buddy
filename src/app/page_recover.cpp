@@ -73,9 +73,9 @@ void ui::recoverPage(lv_obj_t* page) {
   shownRunning = jobs::running, shownStep = jobs::step, shownKey = hal::keyState();
   bool mine = jobs::kind == jobs::RECOVER;
   std::string from = jobs::recovering(), name = nameOf(from);
-  for (const Firmware& f : catalog::sd) {
-    if (f.file == name && !f.name.empty()) {
-      name = f.name;
+  for (const FwItem& f : catalog::sd.items) {
+    if (name == catalog::sd.str(f.file)) {
+      name = catalog::sd.str(f.name);
     }
   }
   header(page, devText(LV_SYMBOL_WARNING "  Recovering the FM-1").c_str());
@@ -245,12 +245,14 @@ void ui::recoverStartPage(lv_obj_t* page) {
 
   label(body, "Put back on it", &lv_font_montserrat_14, t.text);
   choices.clear();
-  for (const Firmware& f : catalog::sd) {
-    bool smk = isSmk(f.product.c_str());  // (it says what it's for: recovery checks the flash it finds)
-    if (!strncmp(f.product.c_str(), "FM-1_", 5) || smk) {
-      std::string v = f.stock ? "stock" : f.version.empty() ? "firmware"
-                                                            : f.version;
-      choices.push_back({FW_DIR "/" + f.file, f.name.empty() ? f.file : f.name, smk ? v + ", SMK-37" : v});
+  for (const FwItem& f : catalog::sd.items) {
+    const char *product = catalog::sd.str(f.product), *version = catalog::sd.str(f.version);
+    const char *file = catalog::sd.str(f.file), *fname = catalog::sd.str(f.name);
+    bool smk = isSmk(product);  // (it says what it's for: recovery checks the flash it finds)
+    if (!strncmp(product, "FM-1_", 5) || smk) {
+      std::string v = f.flags & FwItem::STOCK ? "stock" : *version ? version
+                                                                   : "firmware";
+      choices.push_back({std::string(FW_DIR "/") + file, *fname ? fname : file, smk ? v + ", SMK-37" : v});
     }
   }
   backups(choices);

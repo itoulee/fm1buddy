@@ -549,11 +549,12 @@ static void batteryWatch() {
 // at power-on, on a thread of their own (the screen answers meanwhile): the Hub's list (its short copy, catalog::loadHub,
 // in a moment; without one, the whole list, seconds, which writes the copy for next time), then the SD card's
 // firmwares. The UI's thread takes them once they're there (bootWatch)
-static std::vector<Firmware> bootHub, bootSd;
+static FwList bootHub, bootSd;
 static std::string bootUpdated;
 static std::atomic<bool> bootDone{false};
 static bool bootRunning;
-static bool hubNew;  // the Hub's list came new since: the one read at power-on is old
+static bool hubNew;      // the Hub's list came new since: the one read at power-on is old
+static int bootUnknown;  // the card's files without a sha256 yet
 
 static void bootBegin() {
   bootRunning = true;
@@ -566,7 +567,7 @@ static void bootBegin() {
           catalog::parseHub(bootHub, bootUpdated, err);
         }
         uint32_t hubMs = hal::millis() - t;
-        catalog::scanSdInto(bootHub, bootSd);
+        bootUnknown = catalog::scanSdInto(bootHub, bootSd);
         hal::log("boot: hub %u firmwares %s (%u ms)%s%s, sd %u (%u ms)", (unsigned)bootHub.size(), kept ? "kept" : "read",
                  (unsigned)hubMs, err.empty() ? "" : ": ", err.c_str(), (unsigned)bootSd.size(),
                  (unsigned)(hal::millis() - t - hubMs));
@@ -587,14 +588,23 @@ static void bootWatch() {
     catalog::hubUpdated = bootUpdated;
     catalog::sd.swap(bootSd);
   }
-  std::vector<Firmware>().swap(bootHub);
-  std::vector<Firmware>().swap(bootSd);
+  FwList().swap(bootHub);
+  FwList().swap(bootSd);
+  if (bootUnknown) {
+    catalog::hashSd();
+  }
   if (current == firmwarePage) {
     go(firmwarePage);
   }
 }
 
 static void watch(lv_timer_t*) {
+  if (!bootRunning && catalog::sdHashed()) {  // (more of the card's firmwares known: what they are)
+    catalog::scanSd();
+    if (current == firmwarePage) {
+      firmwareListAgain();
+    }
+  }
   if (jobs::bluetoothPaused()) {
     toast("Bluetooth MIDI is paused: Wi-Fi is on.");
   }
@@ -602,7 +612,7 @@ static void watch(lv_timer_t*) {
     seenFinished = jobs::finished;
     if (jobs::ok && jobs::kind == jobs::HUB) {
       catalog::hub.swap(jobs::hub);
-      std::vector<Firmware>().swap(jobs::hub);  // the old list
+      FwList().swap(jobs::hub);  // the old list
       hubNew = true;
       catalog::hubUpdated = jobs::hubUpdated;
       catalog::scanSd();

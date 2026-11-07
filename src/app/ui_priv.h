@@ -61,6 +61,8 @@ lv_obj_t* flashMap(lv_obj_t* parent, int cell, bool writing);
 
 // the pages
 void firmwarePage(lv_obj_t* page);
+// the firmware list made again (catalog::sd changed), scrolled where it was: only while firmwarePage shows
+void firmwareListAgain();
 void midiPage(lv_obj_t* page);
 void playPage(lv_obj_t* page);    // clock, arpeggiator, chords
 void mapPage(lv_obj_t* page);     // the mapping's rules

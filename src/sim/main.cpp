@@ -299,9 +299,9 @@ int main(int argc, char** argv) {
     }
     if (run && !install.empty() && ended && tries < 3 && (int32_t)(hal::millis() - installAt) >= 0) {
       Firmware f;
-      for (auto& x : catalog::sd) {
-        if (x.file == install) {
-          f = x;
+      for (size_t i = 0; i < catalog::sd.size(); i++) {
+        if (install == catalog::sd.str(catalog::sd[i].file)) {
+          f = catalog::details(catalog::sd, i);
         }
       }
       f.file = install;

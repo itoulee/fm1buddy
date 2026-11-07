@@ -89,8 +89,8 @@ extern std::atomic<uint32_t> done, total;  // bytes, while FETCHING and WRITING
 // once it has finished
 extern bool ok;
 extern std::string error;
-extern std::vector<hal::Ap> aps;   // SCAN
-extern std::vector<Firmware> hub;  // HUB: the new list
+extern std::vector<hal::Ap> aps;  // SCAN
+extern FwList hub;                // HUB: the new list
 extern std::string hubUpdated;
 extern int device;             // PROBE, SEND, VOICE, KEEP, RESTORE: the device
 extern sounds::Speaks speaks;  // PROBE
