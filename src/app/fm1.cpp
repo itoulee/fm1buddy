@@ -469,7 +469,7 @@ static bool candidateDev(const midi::Dev& v) {
       return true;
     }
   }
-  return v.vid == 0x1209 && (v.pid == 1 || v.pid == 2);  // Felucca, its loader
+  return v.vid == 0x1209;  // Felucca, its loader, and the firmwares built on it (each has its own PID)
 }
 
 static bool handshake(int d, Fm1Id& id, int tries = 2) {
