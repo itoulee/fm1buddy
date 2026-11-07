@@ -33,7 +33,7 @@ It should be useful for most firmware, depending on what it supports, but it has
 - load/save sample-banks quickly (for swapping sets at a live show)
 - export as MIDI/WAV for use n other programs
 
-No soldering or assembly needed, just get a cheap [Freenove ESP32-S3 2.8"](https://store.freenove.com/products/fnk0104?variant=45040270213318) (FNK0104B). The same board comes in 3.5" (FNK0104N) and 4" (FNK0104S), with bigger screens (both 480x320), and its own firmware here: the 4"'s is tried on one, the 3.5"'s (a different panel, its own pins) isn't yet. Other sizes and makes won't work: the firmware is made for these boards (their screen, touch and SD pins). You might additionally need a USB power-splitter and/or a small USB hub, depending on what you are doing.
+No soldering or assembly needed, just get a cheap [Freenove ESP32-S3 2.8"](https://store.freenove.com/products/fnk0104?variant=45040270213318) (FNK0104B). The same board comes in 3.5" (FNK0104N) and 4" (FNK0104S), with bigger screens (both 480x320), and its own firmware here (the 3.5"'s, a different panel with its own pins, isn't tried on one yet). Other sizes and makes won't work: the firmware is made for these boards (their screen, touch and SD pins). You might additionally need a USB power-splitter and/or a small USB hub, depending on what you are doing.
 
 **Install it, and how to set it up:** <https://konsumer.github.io/fm1buddy/>
 
