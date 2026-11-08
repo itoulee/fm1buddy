@@ -18,7 +18,13 @@ namespace midi {
 struct Dev {
   bool on;
   uint16_t vid, pid;
-  char name[32];
+  // its name as it says it (base), and where it is on the hub (port: a letter a hub port, "A" for port 1, from the
+  // USB-C port out, "CB" for port 2 of a hub on port 3; "" when it isn't on a hub). name is what the screen shows and
+  // rules match: base, or with the port after it ("nanoKEY2 B") while another device on the hub has the same base.
+  // Rules match "base port" too, so "to \"fm-1 b\"" keeps reaching it alone
+  char base[32];
+  char port[8];
+  char name[40];
   uint32_t serial;     // new on every mount: a new device in the same slot is noticed
   uint32_t lastIn;     // when it last sent something (ms)
   uint8_t last[3];     // the last channel message it sent
@@ -44,7 +50,7 @@ extern std::atomic<uint32_t> seq;  // goes up when a device comes or goes
 bool dev(int d, Dev& out);
 
 // the USB host task
-void mount(int d, uint16_t vid, uint16_t pid, const char* name);
+void mount(int d, uint16_t vid, uint16_t pid, const char* name, const char* port = "");
 void umount(int d);
 void in(int d, const uint8_t p[4]);  // a USB MIDI packet it sent
 // hands what's waiting for devices from..to-1 to them (hal::midiOut): the USB task does the USB ones, the

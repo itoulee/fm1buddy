@@ -954,15 +954,16 @@ void fake::keysClock(bool on) {
   clockOut = on;
 }
 
-static void run(bool fm1, bool keys) {
+static void run(bool fm1, int keys) {
   if (fm1) {
     f.ident = f.smk ? "SMK-37 Elite_016" : f.fomajam ? "FM-1_961"
                                                      : "FM-1_015";
     f.next = decltype(f.state)::RUN;
     f.mountAt = hal::millis() + 500;
   }
-  if (keys) {
-    midi::mount(KEYS, 0x0944, 0x0115, "nanoKEY2");
+  for (int k = 0; k < keys && KEYS + k < MIDI_USB; k++) {  // on hub ports B, C...: the same keyboard twice is "nanoKEY2 B" and "C"
+    char port[2] = {(char)('B' + k), 0};
+    midi::mount(KEYS + k, 0x0944, 0x0115, "nanoKEY2", port);
   }
   uint32_t playAt = hal::millis() + 2000, clockAt = hal::millis();
   int n = 0;
@@ -975,7 +976,8 @@ static void run(bool fm1, bool keys) {
                   f.state == decltype(f.state)::LOADER ? (f.smk ? "ota-SMK-37 Elite" : "ota-FM-1")
                   : f.fomajam || f.sloop               ? "Felucca"
                   : f.smk                              ? "SMK-37 Elite"
-                                                       : "FM-1");
+                                                       : "FM-1",
+                  "A");
     }
     if (f.waiting && now - f.askedAt > 1000) {
       hal::log("fake fm-1: no answer: asking again");
@@ -1001,7 +1003,7 @@ static void run(bool fm1, bool keys) {
   }
 }
 
-void fake::begin(bool fm1, bool keys, bool faults, bool fomajam) {
+void fake::begin(bool fm1, int keys, bool faults, bool fomajam) {
   f.faults = faults;
   f.fomajam = fomajam;
   f.song.assign(SONG_SIZE, 0);

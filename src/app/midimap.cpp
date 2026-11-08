@@ -234,6 +234,8 @@ static const char HELP[] =
     "# in; without \"to\", it goes to all the other devices. +N or -N moves notes N semitones; vel N plays every note\n"
     "# at velocity N, vel N% scales how hard they're played. The first rule that matches a message decides; a\n"
     "# message no rule matches goes on as it is. Clock, start/stop and SysEx always go on as they are.\n"
+    "# Two of the same device on the hub get their hub port's letter after the name (port 1 is A): \"fm-1 a\" and\n"
+    "# \"fm-1 b\" each reach just one, and \"fm-1\" reaches both. Keep each on its port and it keeps its letter.\n"
     "# For example, two controllers playing the FM-1 on channels of their own:\n"
     "#\n"
     "#   from nanokey -> to fm-1 ch 1\n"

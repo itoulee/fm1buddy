@@ -310,6 +310,23 @@ bool hal::storageCommand(const uint8_t* cdb, uint8_t cdbLen, bool in, uint8_t* b
 }
 
 // ------------------------------------------------------------------------------------- TinyUSB's ---
+// where a device is on the hub, from the USB-C port out: a letter a hub port ("B": port 2; "CB": port 2 of a hub on
+// port 3), "" straight on the USB-C port. The same port, the same letters: midi.h tells same-named devices apart by it
+static void portOf(uint8_t daddr, char* out, size_t n) {
+  char rev[8];
+  size_t k = 0;
+  tuh_bus_info_t b;
+  while (k < sizeof rev && tuh_bus_info_get(daddr, &b) && b.hub_addr && b.hub_port) {
+    rev[k++] = b.hub_port <= 26 ? (char)('A' + b.hub_port - 1) : '?';
+    daddr = b.hub_addr;
+  }
+  size_t i = 0;
+  for (; i < k && i < n - 1; i++) {
+    out[i] = rev[k - 1 - i];
+  }
+  out[i] = 0;
+}
+
 // device i is ready, with its name (or none)
 static void mountMidi(uint8_t i, bool named) {
   char name[32] = "";
@@ -324,8 +341,10 @@ static void mountMidi(uint8_t i, bool named) {
   }
   uint16_t vid = 0, pid = 0;
   tuh_vid_pid_get(dev[i].daddr, &vid, &pid);
+  char port[8];
+  portOf(dev[i].daddr, port, sizeof port);
   dev[i].on = true;
-  midi::mount(i, vid, pid, name);
+  midi::mount(i, vid, pid, name, port);
 }
 
 static void gotName(tuh_xfer_t* x) {

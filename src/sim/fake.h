@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 namespace fake {
-void begin(bool fm1, bool keys, bool faults, bool fomajam = false);
+void begin(bool fm1, int keys, bool faults, bool fomajam = false);  // keys: how many keyboards (the same one)
 // the FM-1 runs SLOOP (its editor protocol: backups, projects, sample slots)
 void sloopMode(bool on);
 // or plain Felucca: the same protocol, its 3 sample slots and no backups
