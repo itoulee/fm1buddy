@@ -640,7 +640,7 @@ static void watch(lv_timer_t*) {
 }
 
 const char* const ui::START_NAMES[STARTS] = {"Firmware: SD card", "MIDI", "Mapping", "Touch: X/Y pad",
-                                             "Manager", "Firmware: Hub", "Touch: pads", "FM-1 screen"};
+                                             "Manager", "Firmware: Hub", "Touch: pads", "Big Screen"};
 const Start ui::START_ORDER[STARTS] = {START_FIRMWARE, START_HUB, START_MIDI, START_MAPPING,
                                        START_TOUCH, START_PADS, START_SCREEN, START_SOUNDS};
 
