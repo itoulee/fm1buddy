@@ -11,6 +11,7 @@
 #include "catalog.h"
 #include "hal.h"
 #include "midimap.h"
+#include "mirror.h"
 #include "play.h"
 
 #define OUT_N 512  // packets waiting for each device
@@ -48,6 +49,10 @@ struct Slot {
   uint32_t qw, qr;
   std::vector<uint8_t>* cap;  // capture: everything, and the message so far
   uint32_t capDone;           // its complete messages end here
+  // the screen's SysEx (mirror.h) isn't routed while it shows: its first packet waits (fs 1) until the next says
+  // whether it's one (fs 2: dropped to its end)
+  uint8_t fsHeld[4];
+  uint8_t fs;
 };
 // on the heap (PSRAM, on the S3: big blocks go there)
 static Slot* slots = new Slot[MIDI_DEVS]();
@@ -223,7 +228,7 @@ static void captureByte(Slot& s, uint8_t b) {
   }
 }
 
-static void sysexByte(Slot& s, uint8_t b) {
+static void sysexByte(int d, Slot& s, uint8_t b) {
   if (s.cap) {
     captureByte(s, b);
   }
@@ -243,6 +248,9 @@ static void sysexByte(Slot& s, uint8_t b) {
   }
   if (b == 0xF7) {
     s.curOn = false;
+    if (mirror::sysex(d, s.cur, s.curN)) {
+      return;  // the FM-1's screen: it has it
+    }
     if (s.qw - s.qr < SYSEX_Q) {
       memcpy(s.q[s.qw % SYSEX_Q], s.cur, s.curN);
       s.qn[s.qw % SYSEX_Q] = s.curN;
@@ -255,6 +263,7 @@ static void sysexByte(Slot& s, uint8_t b) {
 
 static void inLocked(int d, const uint8_t p[4]);
 static void routeLocked(int d, const uint8_t p[4]);
+static bool screenSysex(Slot& s, const uint8_t p[4]);
 
 void midi::in(int d, const uint8_t p[4]) {
   if (d < 0 || d >= MIDI_DEVS) {
@@ -273,13 +282,13 @@ static void inLocked(int d, const uint8_t p[4]) {
   switch (cin) {
     case 0x4:  // SysEx: 3 bytes, more to come
     case 0x7:  // SysEx: the last 3
-      sysexByte(s, p[1]), sysexByte(s, p[2]), sysexByte(s, p[3]);
+      sysexByte(d, s, p[1]), sysexByte(d, s, p[2]), sysexByte(d, s, p[3]);
       break;
     case 0x6:  // the last 2
-      sysexByte(s, p[1]), sysexByte(s, p[2]);
+      sysexByte(d, s, p[1]), sysexByte(d, s, p[2]);
       break;
     case 0x5:  // 1 byte: the last of a SysEx, or system common
-      sysexByte(s, p[1]);
+      sysexByte(d, s, p[1]);
       break;
     case 0x8 ... 0xE:  // channel messages
       memcpy(s.d.last, p + 1, 3);
@@ -299,7 +308,36 @@ static void inLocked(int d, const uint8_t p[4]) {
   if ((cin == 0x8 || cin == 0x9) && play::noteLocked(d, p + 1, outLocked)) {
     return;  // the arpeggiator or chords have it
   }
+  if (cin >= 0x4 && cin <= 0x7 && screenSysex(s, p)) {
+    return;
+  }
   routeLocked(d, p);
+}
+
+// the FM-1's screen (F0 7D 'F' 'S' ...) stays here while it shows: a row a few ms to every other device would only
+// fill their queues. True: p isn't routed (now)
+static bool screenSysex(Slot& s, const uint8_t p[4]) {
+  uint8_t cin = p[0] & 0x0F;
+  bool last = cin != 0x4;
+  if (s.fs == 2) {  // one of the screen's: to its end
+    s.fs = last ? 0 : 2;
+    return true;
+  }
+  if (s.fs == 1) {  // its start waited: this says
+    if (p[1] == 'S') {
+      s.fs = last ? 0 : 2;
+      return true;
+    }
+    s.fs = 0;
+    routeLocked(&s - slots, s.fsHeld);
+    return false;
+  }
+  if (cin == 0x4 && p[1] == 0xF0 && p[2] == 0x7D && p[3] == 'F' && mirror::active()) {
+    memcpy(s.fsHeld, p, 4);
+    s.fs = 1;
+    return true;
+  }
+  return false;
 }
 
 // a packet from device d on to the others, through the mapping

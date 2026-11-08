@@ -16,7 +16,8 @@ All without a computer/phone/etc:
 - Arpeggiator (up, down, up-down, random, as played; 1/4 to 1/32; up to 4 octaves; hold) and chord memory, for any controller (the FM-1's own notes are left alone)
 - Record the FM-1's audio to WAV files on the SD card, over USB, with level meters and a clip warning (firmware that sends USB audio: Felucca, and those built on it like SLOOP; any class-compliant USB mic or sound card works too)
 - Touchscreen MIDI controller: a two-finger X/Y pad (each finger sends 2 CCs, and can play notes on a scale) and 16 velocity-sensitive pads. It's a controller like any other, so mapping rules, clock, arp and chords work on it
-- Choose what it starts on: firmware manager, MIDI hub, mapper, or touch controller
+- Big Screen: show the FM-1's screen big (Manager > Big Screen). Only on firmware with the Big Screen feature (the [bigscreen tag](https://mutant.cloud/?tag=bigscreen) on mutant.cloud), not other firmware
+- Choose what it starts on: firmware manager, MIDI hub, mapper, touch controller, or Big Screen
 - USB MIDI for a computer: plugged straight into one, it's a class-compliant USB MIDI device (Settings > On a computer), so the touch controller, clock and Bluetooth MIDI devices reach your DAW, and the DAW can play them
 - Warns before you install firmware with no backup of the FM-1 on the SD card, with a button to make one
 - Sample-management (folders of WAV to its sample-banks, and back)
@@ -77,7 +78,7 @@ pio run -e sim-4 && .pio/build/sim-4/program --fm1 --keys  # at the 4"'s (and th
 
 `tools/unit-test.sh` runs the tests of the MIDI mapping's rules and SLOOP's formats (`test/`: a sample slot made from
 .wav files must be the bytes SLOOP's own `tools/sampleio.py` makes). `--sloop` makes the simulator's FM-1 one running
-SLOOP 2.8, `--felucca` one running Felucca 1.6.1 (its 3 sample slots), `--smk` an SMK-37 Elite on its stock firmware. `--theme NAME` shows it in one of the themes (WHITE, NEON, ...), to check a page in all of them. `--clock` gives the simulator's keyboard
+SLOOP 2.8, `--felucca` one running Felucca 1.6.1 (its 3 sample slots), `--smk` an SMK-37 Elite on its stock firmware, `--bigscreen` one whose firmware sends its screen (Manager > Big Screen). `--theme NAME` shows it in one of the themes (WHITE, NEON, ...), to check a page in all of them. `--clock` gives the simulator's keyboard
 MIDI clock to follow; `press X Y`, `release`, `finger2 X Y` and `lift2` in a script hold fingers down, for the touch
 controller.
 

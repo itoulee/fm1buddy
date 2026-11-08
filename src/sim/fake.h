@@ -13,7 +13,8 @@ void sloopMode(bool on);
 void feluccaMode(bool on);
 // or an SMK-37 Elite (the FM-1's chip in a keyboard) on its stock firmware
 void smkMode(bool on);
-void lostCalMode(bool on);  // its SMK-37 calibration sector blank (--lostcal)
+void lostCalMode(bool on);    // its SMK-37 calibration sector blank (--lostcal)
+void bigscreenMode(bool on);  // its firmware has Big Screen: it sends its screen while asked (--bigscreen)
 // the keyboard sends MIDI clock too, at 100 BPM (to follow)
 void keysClock(bool on);
 // the FM-1 sends a DX7 bank (as from its menu)

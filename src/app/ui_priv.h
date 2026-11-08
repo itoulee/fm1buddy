@@ -68,6 +68,7 @@ void playPage(lv_obj_t* page);    // clock, arpeggiator, chords
 void mapPage(lv_obj_t* page);     // the mapping's rules
 void mapAddPage(lv_obj_t* page);  // a new rule
 void touchPage(lv_obj_t* page);   // the touch controller (all of the screen)
+void mirrorPage(lv_obj_t* page);  // the FM-1's screen, big (all of the screen; mirror.h)
 // the page fm1buddy starts on (Settings): its tab and page. Kept as a number: new ones go at the end
 enum Start { START_FIRMWARE,  // the SD card's firmwares (no Wi-Fi needed)
              START_MIDI,
@@ -75,7 +76,8 @@ enum Start { START_FIRMWARE,  // the SD card's firmwares (no Wi-Fi needed)
              START_TOUCH,  // the touch controller's X/Y pad
              START_SOUNDS,
              START_HUB,   // the Hub's firmwares
-             START_PADS,  // the touch controller's pads
+             START_PADS,    // the touch controller's pads
+             START_SCREEN,  // the FM-1's screen (mirror.h)
              STARTS };
 extern const char* const START_NAMES[STARTS];
 extern const Start START_ORDER[STARTS];  // as the list shows them
