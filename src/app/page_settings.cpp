@@ -479,7 +479,8 @@ static void startOnPage(lv_obj_t* page) {
                                             "Play the screen: a pad for two fingers",
                                             "Sounds, setups, backups",
                                             "The Firmware Hub's list (Wi-Fi)",
-                                            "Play the screen: 16 pads"};
+                                            "Play the screen: 16 pads",
+                                            "The FM-1's screen, big (Big Screen firmware)"};
   int now = startPage();
   for (int i : START_ORDER) {
     lv_obj_t* r = listRow(body, startPicked, (void*)(intptr_t)i);

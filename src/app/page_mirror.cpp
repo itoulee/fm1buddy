@@ -83,11 +83,14 @@ void ui::mirrorPage(lv_obj_t* page) {
   const Theme& t = theme();
   fullscreen(true);
   mirror::on(true);
+  // its own box over all of the screen: the page object is every page's, and go() puts back only its padding
   lv_obj_set_style_pad_all(page, 0, 0);
-  lv_obj_set_style_bg_color(page, lv_color_black(), 0);
-  lv_obj_set_style_bg_opa(page, LV_OPA_COVER, 0);
-  lv_obj_remove_flag(page, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_layout(page, LV_LAYOUT_NONE);
+  lv_obj_t* box = lv_obj_create(page);
+  lv_obj_remove_style_all(box);
+  lv_obj_set_size(box, SCREEN_W, SCREEN_H);
+  lv_obj_set_style_bg_color(box, lv_color_black(), 0);
+  lv_obj_set_style_bg_opa(box, LV_OPA_COVER, 0);
+  lv_obj_remove_flag(box, LV_OBJ_FLAG_SCROLLABLE);
 
   if (SIDE != MIRROR_SIZE && !scaled) {  // (kept: it's there at once next time)
     scaled = (uint16_t*)calloc(SIDE * SIDE, 2);
@@ -107,7 +110,7 @@ void ui::mirrorPage(lv_obj_t* page) {
   dsc.header.stride = SIDE * 2;
   dsc.data = (const uint8_t*)(SIDE != MIRROR_SIZE ? scaled : mirror::pixels());
   dsc.data_size = SIDE * SIDE * 2;
-  img = lv_image_create(page);
+  img = lv_image_create(box);
   lv_obj_set_pos(img, LEFT, 0);
   lv_obj_set_size(img, SIDE, SIDE);
   if (dsc.data) {
@@ -115,7 +118,7 @@ void ui::mirrorPage(lv_obj_t* page) {
   }
   lv_obj_add_event_cb(img, gone, LV_EVENT_DELETE, 0);
 
-  waiting = label(page, devText("Waiting for the FM-1's screen.\n\nIt needs a Big Screen firmware\n"
+  waiting = label(box, devText("Waiting for the FM-1's screen.\n\nIt needs a Big Screen firmware\n"
                                 "(the Hub's bigscreen tag).")
                             .c_str(),
                   &lv_font_montserrat_14, t.dim);
@@ -123,7 +126,7 @@ void ui::mirrorPage(lv_obj_t* page) {
   lv_obj_set_style_text_align(waiting, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_align(waiting, LV_ALIGN_CENTER, 0, 0);
 
-  lv_obj_t* back = button(page, LV_SYMBOL_LEFT, [](lv_event_t*) { go(SOUNDS, soundsPage); });
+  lv_obj_t* back = button(box, LV_SYMBOL_LEFT, [](lv_event_t*) { go(SOUNDS, soundsPage); });
   lv_obj_set_size(back, LEFT > 40 ? 40 : LEFT - 4, 30);
   lv_obj_set_pos(back, 2, 4);
 
