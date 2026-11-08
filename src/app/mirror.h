@@ -21,6 +21,6 @@ bool sysex(int d, const uint8_t* m, uint32_t n);
 const uint16_t* pixels();
 // the rows painted since the last look (false if none): first and last
 bool dirty(int& y0, int& y1);
-// a row came in the last 3 s
+// a row came since the page opened (the screen sends only what changes: a still one sends nothing)
 bool live();
 }  // namespace mirror

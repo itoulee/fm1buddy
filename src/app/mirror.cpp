@@ -13,7 +13,7 @@
 #include "midi.h"
 
 static std::atomic<bool> showing{false};
-static std::atomic<uint32_t> lastRow{0};
+static std::atomic<bool> seen{false};  // a row came since the page opened
 static uint16_t* screen;  // (PSRAM on the board: a big block)
 static std::mutex lock;   // the dirty rows
 static int dirty0 = MIRROR_SIZE, dirty1 = -1;
@@ -26,6 +26,7 @@ void mirror::on(bool on) {
   }
   if (on && !showing) {
     fresh = true;
+    seen = false;
     helloAt = 0;
   }
   showing = on && screen;
@@ -40,8 +41,7 @@ const uint16_t* mirror::pixels() {
 }
 
 bool mirror::live() {
-  uint32_t at = lastRow;
-  return at && hal::millis() - at < 3000;
+  return seen;
 }
 
 // who may be an FM-1: those fm1.h asks, and the Big Screen firmware on M-VAVE's Open V14 ("FM1 Community")
@@ -71,8 +71,9 @@ void mirror::service() {
     return;
   }
   helloAt = now;
-  // 01 (all of it) when we start, and again while nothing comes (it may have missed one)
-  const uint8_t all = fresh || !live();
+  // 01 (all of it) when we start, and again until a row comes (it may have missed one). Then 00: it sends only what
+  // changes, so a still screen sends nothing at all
+  const uint8_t all = fresh || !seen;
   const uint8_t hello[] = {0xF0, 0x7D, 'F', 'S', all, 0xF7};
   for (int d = 0; d < MIDI_USB; d++) {
     if (fm1Like(d)) {
@@ -100,7 +101,7 @@ bool mirror::sysex(int, const uint8_t* m, uint32_t n) {
       row[x++] = c;
     }
   }
-  lastRow = hal::millis() | 1;
+  seen = true;
   std::lock_guard<std::mutex> g(lock);
   dirty0 = y < dirty0 ? y : dirty0;
   dirty1 = y > dirty1 ? y : dirty1;
