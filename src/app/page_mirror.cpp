@@ -80,7 +80,7 @@ void ui::mirrorPage(lv_obj_t* page) {
   lv_obj_set_style_text_align(waiting, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_align(waiting, LV_ALIGN_CENTER, 0, 0);
 
-  lv_obj_t* back = button(page, LV_SYMBOL_LEFT, [](lv_event_t*) { go(MIDI, midiPage); });
+  lv_obj_t* back = button(page, LV_SYMBOL_LEFT, [](lv_event_t*) { go(SOUNDS, soundsPage); });
   lv_obj_set_size(back, LEFT > 40 ? 40 : LEFT - 4, 30);
   lv_obj_set_pos(back, 2, 4);
 

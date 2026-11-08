@@ -384,6 +384,7 @@ void ui::soundsPage(lv_obj_t* page) {
   pickDevice();
 
   // recording the FM-1's sound; all of its flash to the SD card, and back on one that doesn't start
+  navRow(body, LV_SYMBOL_IMAGE "  Big Screen", "its firmwares only", mirrorPage, t.dim);
   navRow(body, LV_SYMBOL_AUDIO "  Record audio", record::recording() ? "recording" : "", recordPage, t.knob[0]);
   navRow(body, devText(LV_SYMBOL_SAVE "  Back up the FM-1").c_str(), "", backupPage, t.dim);
   navRow(body, LV_SYMBOL_WARNING "  Unbrick", devText("FM-1 won't start?").c_str(), recoverStartPage, t.dim);
