@@ -1,10 +1,10 @@
 // The app on the desktop: an SDL window twice the screen's size, the mouse for touch.
 //
-//   program [--headless] [--zoom N] [--theme NAME] [--fm1] [--fomajam] [--sloop] [--smk] [--lostcal] [--faults] [--keys] [--clock] [--install FILE]
+//   program [--headless] [--zoom N] [--theme NAME] [--fm1] [--fomajam] [--sloop] [--smk] [--lostcal] [--faults] [--keys [N]] [--clock] [--install FILE]
 //           [--script "tap 24 70; wait 300; shot a.bmp; quit"]
 //
 // --fm1 puts a pretend FM-1 on the hub (it goes through a whole install), --fomajam makes it one running fomajam (it
-// shares its song), --sloop one running SLOOP 2.8 (backups, projects, sample slots), --smk makes it an SMK-37 Elite, --lostcal an SMK-37 whose calibration sector is blank (it looks like an FM-1), --faults makes it and its USB misbehave, --keys adds a keyboard that plays now and then (--clock:
+// shares its song), --sloop one running SLOOP 2.8 (backups, projects, sample slots), --smk makes it an SMK-37 Elite, --lostcal an SMK-37 whose calibration sector is blank (it looks like an FM-1), --faults makes it and its USB misbehave, --keys adds a keyboard that plays now and then (--keys 2: two of the same, on hub ports B and C) (--clock:
 // and sends MIDI clock at 100 BPM).
 // --install FILE installs /fm1/FILE on the pretend FM-1, again (as a person would) if it doesn't finish, up to 3
 // times, then quits: 0 if it's installed, 1 if not.
@@ -128,7 +128,8 @@ static void pump(int ms) {
 }
 
 int main(int argc, char** argv) {
-  bool headless = false, fm1 = false, keys = false, faults = false, fomajam = false;
+  bool headless = false, fm1 = false, faults = false, fomajam = false;
+  int keys = 0;
   const char* themeName = 0;
   int zoom = 2;
   std::string script, install;
@@ -145,7 +146,7 @@ int main(int argc, char** argv) {
       install = argv[++i];
       fm1 = true;
     } else if (!strcmp(argv[i], "--keys")) {
-      keys = true;
+      keys = i + 1 < argc && atoi(argv[i + 1]) > 0 ? atoi(argv[++i]) : 1;
     } else if (!strcmp(argv[i], "--sloop")) {
       fm1 = true;
       fake::sloopMode(true);
@@ -159,7 +160,7 @@ int main(int argc, char** argv) {
       fm1 = true;
       fake::feluccaMode(true);
     } else if (!strcmp(argv[i], "--clock")) {
-      keys = true;
+      keys = keys ? keys : 1;
       fake::keysClock(true);
     } else if (!strcmp(argv[i], "--theme") && i + 1 < argc) {
       themeName = argv[++i];

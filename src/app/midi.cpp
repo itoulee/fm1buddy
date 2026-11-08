@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 #include <chrono>
 #include <mutex>
@@ -59,6 +60,43 @@ static std::vector<uint32_t> fromDevs, toDevs;
 static uint32_t devsSeq = ~0u;
 static std::string problem;
 
+// a rule's name: the device's name, or its base and port ("fm-1 b" when it's alone, so named "FM-1")
+static bool nameMatches(const char* part, const Dev& v) {
+  if (midimap::matches(part, v.name)) {
+    return true;
+  }
+  if (!*v.port) {
+    return false;
+  }
+  char full[sizeof v.base + sizeof v.port + 1];
+  snprintf(full, sizeof full, "%s %s", v.base, v.port);
+  return midimap::matches(part, full);
+}
+
+// the devices' names: their base, with the port after it for the USB ones that share one with another
+static void namesLocked() {
+  for (int d = 0; d < MIDI_DEVS; d++) {
+    Dev& v = slots[d].d;
+    if (!v.on) {
+      continue;
+    }
+    bool twin = false;
+    for (int o = 0; d < MIDI_USB && o < MIDI_USB && !twin; o++) {
+      twin = o != d && slots[o].d.on && !strcasecmp(slots[o].d.base, v.base);
+    }
+    char was[sizeof v.name];
+    memcpy(was, v.name, sizeof was);
+    if (twin && *v.port) {
+      snprintf(v.name, sizeof v.name, "%s %s", v.base, v.port);
+    } else {
+      snprintf(v.name, sizeof v.name, "%s", v.base);
+    }
+    if (*was && strcmp(was, v.name)) {
+      hal::log("midi: %d (%s) is %s now", d, was, v.name);
+    }
+  }
+}
+
 static void devsFor() {
   if (devsSeq == seq) {
     return;
@@ -68,9 +106,10 @@ static void devsFor() {
   toDevs.assign(rules.size(), 0);
   for (size_t i = 0; i < rules.size(); i++) {
     for (int o = 0; o < MIDI_DEVS; o++) {
-      if (slots[o].d.on) {
-        fromDevs[i] |= midimap::matches(rules[i].from, slots[o].d.name) ? 1u << o : 0;
-        toDevs[i] |= rules[i].to[0] && midimap::matches(rules[i].to, slots[o].d.name) ? 1u << o : 0;
+      const Dev& v = slots[o].d;
+      if (v.on) {
+        fromDevs[i] |= nameMatches(rules[i].from, v) ? 1u << o : 0;
+        toDevs[i] |= rules[i].to[0] && nameMatches(rules[i].to, v) ? 1u << o : 0;
       }
     }
   }
@@ -131,7 +170,7 @@ void midi::route(bool on) {
   hal::log("midi: routing %s", on ? "on" : "off");
 }
 
-void midi::mount(int d, uint16_t vid, uint16_t pid, const char* name) {
+void midi::mount(int d, uint16_t vid, uint16_t pid, const char* name, const char* port) {
   if (d < 0 || d >= MIDI_DEVS) {
     return;
   }
@@ -141,10 +180,12 @@ void midi::mount(int d, uint16_t vid, uint16_t pid, const char* name) {
   s.d.on = true;
   s.d.vid = vid;
   s.d.pid = pid;
-  snprintf(s.d.name, sizeof s.d.name, "%s", name && *name ? name : "USB MIDI");
+  snprintf(s.d.base, sizeof s.d.base, "%s", name && *name ? name : "USB MIDI");
+  snprintf(s.d.port, sizeof s.d.port, "%s", d < MIDI_USB && port ? port : "");
   s.d.serial = ++serials;
+  namesLocked();
   seq++;
-  hal::log("midi: %d is %s (%04X:%04X)", d, s.d.name, vid, pid);
+  hal::log("midi: %d is %s (%04X:%04X%s%s)", d, s.d.name, vid, pid, *s.d.port ? ", hub port " : "", s.d.port);
 }
 
 void midi::umount(int d) {
@@ -154,6 +195,7 @@ void midi::umount(int d) {
   std::lock_guard<std::mutex> g(lock);
   hal::log("midi: %d (%s) went", d, slots[d].d.name);
   reset(slots[d]);
+  namesLocked();
   seq++;
 }
 
