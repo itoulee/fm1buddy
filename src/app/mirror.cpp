@@ -16,7 +16,8 @@ static std::atomic<bool> showing{false};
 static std::atomic<bool> seen{false};  // a row came since the page opened
 static uint16_t* screen;  // (PSRAM on the board: a big block)
 static std::mutex lock;   // the dirty rows
-static int dirty0 = MIRROR_SIZE, dirty1 = -1;
+static uint8_t dirtyRows[MIRROR_SIZE / 8];
+static bool anyDirty;
 static uint32_t helloAt;
 static bool fresh;  // the next hello asks for all of it
 
@@ -103,17 +104,18 @@ bool mirror::sysex(int, const uint8_t* m, uint32_t n) {
   }
   seen = true;
   std::lock_guard<std::mutex> g(lock);
-  dirty0 = y < dirty0 ? y : dirty0;
-  dirty1 = y > dirty1 ? y : dirty1;
+  dirtyRows[y / 8] |= 1 << (y % 8);
+  anyDirty = true;
   return true;
 }
 
-bool mirror::dirty(int& y0, int& y1) {
+bool mirror::dirty(uint8_t rows[MIRROR_SIZE / 8]) {
   std::lock_guard<std::mutex> g(lock);
-  if (dirty1 < 0) {
+  if (!anyDirty) {
     return false;
   }
-  y0 = dirty0, y1 = dirty1;
-  dirty0 = MIRROR_SIZE, dirty1 = -1;
+  memcpy(rows, dirtyRows, sizeof dirtyRows);
+  memset(dirtyRows, 0, sizeof dirtyRows);
+  anyDirty = false;
   return true;
 }

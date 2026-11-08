@@ -19,8 +19,8 @@ void service();
 bool sysex(int d, const uint8_t* m, uint32_t n);
 // the screen: MIRROR_SIZE x MIRROR_SIZE RGB565, row by row (0 until a row has come)
 const uint16_t* pixels();
-// the rows painted since the last look (false if none): first and last
-bool dirty(int& y0, int& y1);
+// the rows painted since the last look, a bit each (row y: rows[y / 8] bit y % 8), cleared: false if none
+bool dirty(uint8_t rows[MIRROR_SIZE / 8]);
 // a row came since the page opened (the screen sends only what changes: a still one sends nothing)
 bool live();
 }  // namespace mirror
