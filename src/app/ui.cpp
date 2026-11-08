@@ -640,9 +640,9 @@ static void watch(lv_timer_t*) {
 }
 
 const char* const ui::START_NAMES[STARTS] = {"Firmware: SD card", "MIDI", "Mapping", "Touch: X/Y pad",
-                                             "Manager", "Firmware: Hub", "Touch: pads"};
+                                             "Manager", "Firmware: Hub", "Touch: pads", "FM-1 screen"};
 const Start ui::START_ORDER[STARTS] = {START_FIRMWARE, START_HUB, START_MIDI, START_MAPPING,
-                                       START_TOUCH, START_PADS, START_SOUNDS};
+                                       START_TOUCH, START_PADS, START_SCREEN, START_SOUNDS};
 
 int ui::startPage() {
   uint8_t s = 0;
@@ -666,7 +666,7 @@ void ui::frame() {
   settingsLoad();
   setTheme(lv_display_get_default());
   build();
-  static const Tab tabs[STARTS] = {FIRMWARE, MIDI, MIDI, MIDI, SOUNDS, FIRMWARE, MIDI};
+  static const Tab tabs[STARTS] = {FIRMWARE, MIDI, MIDI, MIDI, SOUNDS, FIRMWARE, MIDI, MIDI};
   lv_obj_add_state(::tabs[tabs[startPage()]], LV_STATE_CHECKED);
   lv_refr_now(0);
   hal::backlight(settings.brightness);  // (the light on once it's drawn: not a lit black screen meanwhile)
@@ -693,8 +693,9 @@ void ui::begin() {
     go(hal::diskMode() ? diskPage : recoverPage);
   } else {
     midi::mount(MIDI_TOUCH, 0, 0, "Touch");  // the touchscreen, as a controller that's always there
-    static const Tab tabs[STARTS] = {FIRMWARE, MIDI, MIDI, MIDI, SOUNDS, FIRMWARE, MIDI};
-    static const Builder pages[STARTS] = {firmwarePage, midiPage, mapPage, touchPage, soundsPage, firmwarePage, touchPage};
+    static const Tab tabs[STARTS] = {FIRMWARE, MIDI, MIDI, MIDI, SOUNDS, FIRMWARE, MIDI, MIDI};
+    static const Builder pages[STARTS] = {firmwarePage, midiPage, mapPage, touchPage, soundsPage, firmwarePage, touchPage,
+                                          mirrorPage};
     int s = startPage();
     if (s == START_FIRMWARE || s == START_HUB) {
       firmwareSource(s == START_HUB);

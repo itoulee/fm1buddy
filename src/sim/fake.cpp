@@ -49,6 +49,9 @@ static struct {
   bool felucca;  // ... or plain Felucca (the same, but 3 sample slots, no backups)
   bool lostCal;  // its flash's SMK-37 calibration sector is blank (an SMK-37 that lost it: it looks like an FM-1)
   bool smk;      // it's an SMK-37 Elite on its stock firmware (the FM-1's chip and update, its own name)
+  bool bigscreen;  // its firmware has Big Screen: it sends its screen while asked (mirror.h)
+  uint32_t screenUntil;  // asked until then
+  bool screenAll;        // send all of it, not just what changed
   std::vector<uint8_t> song, kits, in;
   uint32_t inTotal, inGot;
 } f;
@@ -770,8 +773,14 @@ static void fromHost(const uint8_t* b, uint32_t n) {
   static const uint8_t KEY[] = {0xF0, 0x22, 0x24, 0x35, 0x7D, 0xF7};
   static const uint8_t UPGRADE[] = {0xF0, 0x22, 0x24, 0x35, 0x7F, 0xF7};
   uint8_t req[16];
+  static const uint8_t SCREEN[] = {0xF0, 0x7D, 'F', 'S'};
   if (n == 10 && !memcmp(b, HS, 4)) {  // (cmd 0x51's frames start the same way)
     identity();
+  } else if (f.state == decltype(f.state)::RUN && f.bigscreen && n == 6 && !memcmp(b, SCREEN, 4) && b[5] == 0xF7) {
+    if (!f.screenUntil || (int32_t)(hal::millis() - f.screenUntil) >= 0 || b[4] == 1) {
+      f.screenAll = true;  // a new viewer
+    }
+    f.screenUntil = hal::millis() + 3000;
   } else if (f.state == decltype(f.state)::RUN && n == sizeof KEY && !memcmp(b, KEY, n)) {
     ubootEnter();
   } else if (f.state == decltype(f.state)::RUN && f.fomajam && share(b, n)) {
@@ -947,6 +956,79 @@ bool hal::bleChanged() {
   return d;
 }
 
+// ------------------------------------------------------------------------------------- Big Screen ---
+// its screen: a header, four pads, and a bar and a dot that move (so changes show), as Big Screen sends it
+#define SCR 240
+static uint16_t screenPx[SCR * SCR], screenSent[SCR * SCR];
+
+static void screenDraw(uint32_t now) {
+  int bar = 20 + (int)((sin(now / 700.0) + 1) * 95), dot = (int)(now / 8 % (SCR - 20));
+  static const uint16_t PADS[] = {0xF800, 0x07E0, 0x001F, 0xFFE0};
+  for (int y = 0; y < SCR; y++) {
+    for (int x = 0; x < SCR; x++) {
+      uint16_t c = 0x10A2;  // dark grey
+      if (y < 28) {
+        c = x > 8 && x < 120 && y > 8 && y < 20 ? 0xFFFF : 0xFD20;  // orange, a white "title"
+      } else if (y >= 40 && y < 160 && x >= 20 && x < 220) {
+        int i = (x - 20) / 100 + (y - 40) / 60 * 2;
+        c = (x - 20) % 100 < 92 && (y - 40) % 60 < 52 ? PADS[i] : c;
+      } else if (y >= 180 && y < 196 && x >= 20 && x < 220) {
+        c = x - 20 < bar ? 0x07FF : 0x4208;
+      } else if (y >= 210 && y < 230 && x >= 10 + dot && x < 30 + dot) {
+        c = 0xFFFF;
+      }
+      screenPx[y * SCR + x] = c;
+    }
+  }
+}
+
+// a row from x0 to x1, as sm_rows sends it: messages of up to 70 bytes, runs of a colour
+static void screenRow(int y, int x0, int x1) {
+  const uint16_t* px = screenPx + y * SCR;
+  for (int x = x0; x < x1;) {
+    uint8_t m[70] = {0xF0, 0x7D, 'F', 'S', 1, (uint8_t)(y & 127), (uint8_t)(y >> 7), (uint8_t)(x & 127),
+                     (uint8_t)(x >> 7)};
+    uint32_t k = 9;
+    for (; x < x1 && k + 5 <= sizeof m; k += 4) {
+      int run = 1;
+      while (x + run < x1 && run < 127 && px[x + run] == px[x]) {
+        run++;
+      }
+      m[k] = (uint8_t)run, m[k + 1] = px[x] & 127, m[k + 2] = px[x] >> 7 & 127, m[k + 3] = px[x] >> 14;
+      x += run;
+    }
+    m[k++] = 0xF7;
+    sendSysex(FM1, m, k);
+  }
+}
+
+static void screenSend(uint32_t now) {
+  if (!f.screenUntil || (int32_t)(now - f.screenUntil) >= 0 || f.state != decltype(f.state)::RUN) {
+    return;
+  }
+  screenDraw(now);
+  for (int y = 0; y < SCR; y++) {
+    int x0 = 0, x1 = SCR;
+    if (!f.screenAll) {  // only what changed
+      while (x0 < SCR && screenPx[y * SCR + x0] == screenSent[y * SCR + x0]) {
+        x0++;
+      }
+      while (x1 > x0 && screenPx[y * SCR + x1 - 1] == screenSent[y * SCR + x1 - 1]) {
+        x1--;
+      }
+    }
+    if (x0 < x1) {
+      screenRow(y, x0, x1);
+    }
+  }
+  memcpy(screenSent, screenPx, sizeof screenPx);
+  f.screenAll = false;
+}
+
+void fake::bigscreenMode(bool on) {
+  f.bigscreen = on;
+}
+
 // ---------------------------------------------------------------------------------------------- run ---
 static std::atomic<bool> clockOut{false};
 
@@ -965,7 +1047,7 @@ static void run(bool fm1, int keys) {
     char port[2] = {(char)('B' + k), 0};
     midi::mount(KEYS + k, 0x0944, 0x0115, "nanoKEY2", port);
   }
-  uint32_t playAt = hal::millis() + 2000, clockAt = hal::millis();
+  uint32_t playAt = hal::millis() + 2000, clockAt = hal::millis(), screenAt = 0;
   int n = 0;
   for (;;) {
     uint32_t now = hal::millis();
@@ -997,6 +1079,10 @@ static void run(bool fm1, int keys) {
       clockAt += 25;  // 100 BPM: 24 a beat
       uint8_t p[4] = {0xF, 0xF8, 0, 0};
       midi::in(KEYS, p);
+    }
+    if (f.bigscreen && (int32_t)(now - screenAt) >= 0) {
+      screenAt = now + 40;
+      screenSend(now);
     }
     midi::service(0, MIDI_DEVS);
     std::this_thread::sleep_for(std::chrono::milliseconds(1));

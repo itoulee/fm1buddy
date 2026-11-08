@@ -141,6 +141,7 @@ void ui::midiPage(lv_obj_t* page) {
 
   // the touch controller first: the one to get right into
   navRow(body, LV_SYMBOL_KEYBOARD "  Touch controller", "", touchPage, t.dim);
+  navRow(body, LV_SYMBOL_IMAGE "  FM-1 screen", "Big Screen", mirrorPage, t.dim);
 
   // routing, and whether it starts at power-on
   switchRow(body, LV_SYMBOL_SHUFFLE "  MIDI routing", midi::routing, toggleRouting, &lv_font_montserrat_16);
