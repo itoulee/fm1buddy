@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <esp_crt_bundle.h>
 #include <esp_http_client.h>
+#include <esp_ota_ops.h>
 #include <ff.h>
 #include <mbedtls/platform.h>
 #include <mbedtls/sha256.h>
@@ -683,6 +684,63 @@ bool hal::listDir(const char* path, void (*fn)(const char* name, uint32_t size, 
     return false;
   }
   return true;
+}
+
+// where the app starts in an installer .bin (the partition table's first app slot)
+#define IMAGE_APP_AT 0x10000
+
+const char* hal::selfUpdate(const char* path, void (*progress)(uint32_t, uint32_t)) {
+  FILE* f = fopen(path, "rb");
+  if (!f) {
+    return "The download isn't on the SD card.";
+  }
+  fseek(f, 0, SEEK_END);
+  long size = ftell(f);
+  uint8_t magic = 0;
+  if (size <= IMAGE_APP_AT || fseek(f, IMAGE_APP_AT, SEEK_SET) || fread(&magic, 1, 1, f) != 1 || magic != 0xE9) {
+    fclose(f);
+    return "That isn't an fm1buddy firmware.";
+  }
+  uint32_t n = size - IMAGE_APP_AT;
+  const esp_partition_t* to = esp_ota_get_next_update_partition(0);
+  if (!to || n > to->size) {
+    fclose(f);
+    return to ? "It's too big for this board's app slot." : "This board has no second app slot.";
+  }
+  hal::log("update: %u bytes into %s (at %06X)", (unsigned)n, to->label, (unsigned)to->address);
+  esp_ota_handle_t h;
+  esp_err_t r = esp_ota_begin(to, OTA_WITH_SEQUENTIAL_WRITES, &h);
+  static uint8_t* buf = (uint8_t*)heap_caps_malloc(4096, MALLOC_CAP_SPIRAM);
+  fseek(f, IMAGE_APP_AT, SEEK_SET);
+  for (uint32_t at = 0; r == ESP_OK && at < n;) {
+    size_t k = fread(buf, 1, std::min<uint32_t>(4096, n - at), f);
+    if (!k) {
+      r = ESP_FAIL;
+      break;
+    }
+    r = esp_ota_write(h, buf, k);
+    at += k;
+    if (progress) {
+      progress(at, n);
+    }
+  }
+  fclose(f);
+  if (r != ESP_OK) {
+    hal::log("update: writing: %s", esp_err_to_name(r));
+    esp_ota_abort(h);
+    return "Writing it failed: the firmware it runs is unchanged.";
+  }
+  if ((r = esp_ota_end(h)) != ESP_OK || (r = esp_ota_set_boot_partition(to)) != ESP_OK) {
+    hal::log("update: %s", esp_err_to_name(r));
+    return "It didn't check out: the firmware it runs is unchanged.";
+  }
+  hal::log("update: done, %s starts next", to->label);
+  return 0;
+}
+
+void hal::reboot() {
+  hal::log("restarting");
+  esp_restart();
 }
 
 bool hal::sha256(const char* path, char hex[65]) {

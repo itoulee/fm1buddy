@@ -43,18 +43,30 @@ jobs:
             rm -f site/fw/*
           done
           if [ -n "$tag" ]; then
-            jq -n --arg tag "$tag" '{tag: $tag}' > site/fw/version.json
-            jq -n --arg v "$tag" '{name: "fm1buddy", version: $v, new_install_prompt_erase: true,
-              builds: [{chipFamily: "ESP32-S3", parts: [{path: "fm1buddy-cyd-s3.bin", offset: 0}]}]}' > site/fw/manifest.json
+            # each board's: the installer's manifest, and its .bin's sha256 in version.json (the board's own update
+            # reads it: Settings > Update). The manifest writes the .bin in pieces, around the settings (NVS, 0x9000
+            # to 0xE000), so an install keeps them (Wi-Fi's too); the whole .bin stays for the board's update
+            files='{}'
+            board() {  # file, name, manifest
+              f=site/fw/$1
+              [ -f "$f" ] || return 0
+              b=${1%.bin}
+              head -c $((0x9000)) "$f" > "site/fw/$b-boot.bin"
+              tail -c +$((0xE000 + 1)) "$f" | head -c $((0x2000)) > "site/fw/$b-otadata.bin"
+              tail -c +$((0x10000 + 1)) "$f" > "site/fw/$b-app.bin"
+              jq -n --arg v "$tag" --arg name "$2" --arg b "$b" '{name: $name, version: $v,
+                new_install_prompt_erase: true, builds: [{chipFamily: "ESP32-S3", parts: [
+                  {path: ($b + "-boot.bin"), offset: 0},
+                  {path: ($b + "-otadata.bin"), offset: 57344},
+                  {path: ($b + "-app.bin"), offset: 65536}]}]}' > "site/fw/$3"
+              files=$(jq -c --arg k "$1" --arg v "$(sha256sum "$f" | cut -d' ' -f1)" '. + {($k): $v}' <<<"$files")
+            }
+            board fm1buddy-cyd-s3.bin 'fm1buddy' manifest.json
             # the 3.5" board's, and the 4"'s, from the releases that have them
-            if [ -f site/fw/fm1buddy-cyd-s3-35.bin ]; then
-              jq -n --arg v "$tag" '{name: "fm1buddy (3.5\")", version: $v, new_install_prompt_erase: true,
-                builds: [{chipFamily: "ESP32-S3", parts: [{path: "fm1buddy-cyd-s3-35.bin", offset: 0}]}]}' > site/fw/manifest-35.json
-            fi
-            if [ -f site/fw/fm1buddy-cyd-s3-4.bin ]; then
-              jq -n --arg v "$tag" '{name: "fm1buddy (4\")", version: $v, new_install_prompt_erase: true,
-                builds: [{chipFamily: "ESP32-S3", parts: [{path: "fm1buddy-cyd-s3-4.bin", offset: 0}]}]}' > site/fw/manifest-4.json
-            fi
+            board fm1buddy-cyd-s3-35.bin 'fm1buddy (3.5")' manifest-35.json
+            board fm1buddy-cyd-s3-4.bin 'fm1buddy (4")' manifest-4.json
+            jq -n --arg tag "$tag" --argjson files "$files" '{tag: $tag, files: $files}' > site/fw/version.json
+            cat site/fw/version.json site/fw/manifest.json
           else
             rm -f site/fw/*
             echo "no release with firmware yet: the page says so"

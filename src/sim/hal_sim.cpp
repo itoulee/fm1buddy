@@ -10,6 +10,7 @@
 #include <sys/mount.h>
 #include <sys/stat.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <string>
@@ -167,6 +168,34 @@ void hal::backlight(uint8_t) {}
 uint32_t hal::batteryMv() {
   const char* v = getenv("FM1BUDDY_BATTERY");
   return v ? (uint32_t)atoi(v) : 4120;
+}
+
+// the board's update, pretended: the file checked as the board does, nothing written
+const char* hal::selfUpdate(const char* path, void (*progress)(uint32_t, uint32_t)) {
+  FILE* f = fopen(path, "rb");
+  if (!f) {
+    return "The download isn't on the SD card.";
+  }
+  fseek(f, 0, SEEK_END);
+  long size = ftell(f);
+  int magic = size > 0x10000 && !fseek(f, 0x10000, SEEK_SET) ? fgetc(f) : -1;
+  fclose(f);
+  if (magic != 0xE9) {
+    return "That isn't an fm1buddy firmware.";
+  }
+  uint32_t n = size - 0x10000;
+  for (uint32_t at = 0; at < n; at += 65536) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    if (progress) {
+      progress(std::min<uint32_t>(at + 65536, n), n);
+    }
+  }
+  hal::log("update: %u bytes (the board would write them now)", (unsigned)n);
+  return 0;
+}
+
+void hal::reboot() {
+  hal::log("sim: the board would restart now, into the new firmware");
 }
 
 void hal::sleep() {

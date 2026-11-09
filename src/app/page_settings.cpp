@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <algorithm>
+
 #include "catalog.h"
 #include "fm1.h"
 #include "hal.h"
@@ -58,6 +60,114 @@ static void hubAuto(lv_event_t* e) {
   settingsSave();
 }
 
+// --------------------------------------------------------------------------------------------- update ---
+// fm1buddy's own update: "Check for update", which becomes "Download v0.1.37" when there's a newer release for this
+// board, until Settings is left (ui::settingsLeft)
+static bool offered;     // a newer release was found, and the button offers it
+static bool showUpdate;  // scroll to it (a check just ended: its button changed)
+static lv_obj_t* updBtn;
+
+void ui::settingsLeft() {
+  offered = false;
+}
+
+static void restartNow(lv_timer_t*) {
+  hal::reboot();
+}
+
+static void updateDone() {
+  if (jobs::kind == jobs::CHECK_UPDATE) {
+    offered = jobs::ok && !jobs::updateTag.empty();
+    if (!jobs::ok) {
+      toast(jobs::error.c_str(), true);
+    } else if (!offered) {
+      toast("fm1buddy is up to date.");
+    }
+    showUpdate = true;
+  } else if (jobs::kind == jobs::UPDATE) {
+    if (jobs::ok) {
+      toast(("Installed " + jobs::updateTag + ": restarting...").c_str());
+      lv_timer_set_repeat_count(lv_timer_create(restartNow, 2000, 0), 1);
+      return;
+    }
+    toast(jobs::error.c_str(), true);
+  }
+  go(settingsPage);
+}
+
+// what the button says while it works, and how full it is (percent; < 0: not filled)
+static std::string updateWork(int& pct) {
+  uint32_t t = jobs::total, d = jobs::done;
+  pct = -1;
+  switch ((int)jobs::step) {
+    case jobs::JOINING:
+      return "Joining Wi-Fi...";
+    case jobs::FETCHING:
+      if (jobs::kind == jobs::CHECK_UPDATE) {
+        return "Checking...";
+      }
+      pct = t ? (int)((uint64_t)d * 100 / t) : 0;
+      return "Downloading " + std::to_string(pct) + "%";
+    case jobs::UPDATING:
+      pct = t ? (int)((uint64_t)d * 100 / t) : 0;
+      // (written: the board checks it all before it starts from it, which takes a while)
+      return t && d >= t ? std::string("Finishing...") : "Installing " + std::to_string(pct) + "%";
+  }
+  return "Checking...";
+}
+
+static void updateTick() {
+  if (!updBtn) {
+    return;
+  }
+  const Theme& t = theme();
+  bool mine = jobs::running && (jobs::kind == jobs::CHECK_UPDATE || jobs::kind == jobs::UPDATE);
+  lv_obj_set_state(updBtn, LV_STATE_DISABLED, jobs::running && !mine);
+  if (!mine) {
+    return;
+  }
+  int pct;
+  std::string text = updateWork(pct);
+  lv_label_set_text(lv_obj_get_child(updBtn, 0), text.c_str());
+  // filled from the left as far as it's got: the accent, then the rest dark (a gradient with no blend: both stops
+  // at the same place)
+  uint8_t at = pct < 0 ? 0 : (uint8_t)(std::min(pct, 100) * 255 / 100);
+  lv_obj_set_style_bg_color(updBtn, color(pct < 0 ? t.off : t.accent), 0);
+  lv_obj_set_style_bg_grad_color(updBtn, color(t.off), 0);
+  lv_obj_set_style_bg_grad_dir(updBtn, LV_GRAD_DIR_HOR, 0);
+  lv_obj_set_style_bg_main_stop(updBtn, at, 0);
+  lv_obj_set_style_bg_grad_stop(updBtn, at, 0);
+}
+
+static void updateTapped(lv_event_t*) {
+  if (jobs::running && (jobs::kind == jobs::CHECK_UPDATE || jobs::kind == jobs::UPDATE)) {
+    return;  // (working on it)
+  }
+  bool ok = offered ? jobs::update() : jobs::checkUpdate();
+  if (!ok) {
+    toast("Busy: try again in a moment.", true);
+  }
+  updateTick();
+}
+
+static void updateRow(lv_obj_t* body) {
+  const Theme& t = theme();
+  lv_obj_t* r = listRow(body, 0, 0);
+  lv_obj_t* l = label(r, LV_SYMBOL_DOWNLOAD "  Update", &lv_font_montserrat_16, t.text);
+  lv_obj_set_flex_grow(l, 1);
+  std::string text = offered ? "Download " + jobs::updateTag : std::string("Check for update");
+  updBtn = button(r, text.c_str(), updateTapped);
+  lv_obj_set_style_min_width(updBtn, 150, 0);  // (the same size as its text changes, so the fill reads right)
+  updateTick();
+  tick = updateTick;
+  jobDone = updateDone;
+  if (showUpdate) {
+    showUpdate = false;
+    lv_obj_update_layout(lv_obj_get_screen(body));
+    lv_obj_scroll_to_view(r, LV_ANIM_OFF);
+  }
+}
+
 void ui::settingsPage(lv_obj_t* page) {
   const Theme& t = theme();
   header(page, "Settings");
@@ -93,6 +203,7 @@ void ui::settingsPage(lv_obj_t* page) {
   menuRow(body, LV_SYMBOL_USB "  USB disk", "SD card", diskStartPage);
   menuRow(body, LV_SYMBOL_USB "  On a computer", hal::computerMidi() ? "USB MIDI" : "Serial port", computerPage);
   menuRow(body, LV_SYMBOL_SD_CARD "  About", FM1BUDDY_VERSION, aboutPage);
+  updateRow(body);
 }
 
 // ----------------------------------------------------------------------------------------------- Wi-Fi ---

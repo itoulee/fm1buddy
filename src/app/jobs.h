@@ -30,7 +30,9 @@ enum Kind { NONE,
             SLOOP_RESTORE,  // SLOOP: a backup onto it (backed up first)
             SLOOP_PROJECT,  // SLOOP: one project of a backup onto it
             SLOOP_SAMPLES,  // SLOOP: .wav files into a sample slot
-            IDENTIFY };     // the FM-1's chip, through its boot loader, and back (uboot::lastChip)
+            IDENTIFY,       // the FM-1's chip, through its boot loader, and back (uboot::lastChip)
+            CHECK_UPDATE,   // fm1buddy's newest release, from the installer page (updateTag)
+            UPDATE };       // fm1buddy's newest release onto this board (then it restarts)
 enum Step { IDLE,
             JOINING,
             FETCHING,
@@ -53,7 +55,8 @@ enum Step { IDLE,
             SAVING,          // RECOVER: its flash as it was, to the SD card
             WRITING_FLASH,   // RECOVER: the sectors that differ (done, total)
             CHECKING_FLASH,  // RECOVER: all of it read again
-            WORKING };       // SLOOP_*: doing (done, total)
+            WORKING,         // SLOOP_*: doing (done, total)
+            UPDATING };      // UPDATE: writing it into the other app slot (done, total)
 
 // The flash map (BACKUP, RECOVER): the FM-1's flash a 4 KiB sector at a time, what's on it and what happened to it, as
 // it happens (the UI draws it: ui::flashMap)
@@ -128,6 +131,13 @@ bool sloopBackup(int d);
 bool sloopRestore(int d, const std::string& file);
 bool sloopProject(int d, const std::string& file, int from, int to);
 bool sloopSamples(int d, const std::string& source, int slot);
+// fm1buddy itself: its newest release for this board (FM1BUDDY_BIN), from the installer page. After CHECK_UPDATE:
+// updateTag is the newer release's tag, "" if this is the newest (or there's none for this board)
+bool checkUpdate();
+bool update();  // updateTag onto this board: ok, and it restarts (the UI does: hal::reboot)
+extern std::string updateTag;
+// a is a newer version than b ("v0.1.37" than "v0.1.36"); anything is newer than a build that isn't a release's
+bool newer(const std::string& a, const std::string& b);
 // "Joining Wi-Fi", "Downloading 40%", "Writing 12%", ...
 std::string status();
 }  // namespace jobs

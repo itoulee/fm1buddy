@@ -325,6 +325,9 @@ void ui::go(Builder b) {
 }
 
 void ui::go(Tab t, Builder b) {
+  if (t != SETTINGS) {
+    settingsLeft();
+  }
   tab = t;
   markTab();
   go(b);
