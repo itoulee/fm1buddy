@@ -205,7 +205,7 @@ lv_obj_t* ui::scroller(lv_obj_t* page) {
   lv_obj_set_flex_grow(o, 1);
   lv_obj_add_flag(o, (lv_obj_flag_t)(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
   lv_obj_set_scroll_dir(o, LV_DIR_VER);
-  lv_obj_set_scrollbar_mode(o, LV_SCROLLBAR_MODE_ACTIVE);
+  lv_obj_set_scrollbar_mode(o, LV_SCROLLBAR_MODE_AUTO);  // (always there while there's more: it's a list)
   lv_obj_set_style_bg_color(o, color(theme().dim), LV_PART_SCROLLBAR);
   lv_obj_set_style_bg_opa(o, LV_OPA_70, LV_PART_SCROLLBAR);
   lv_obj_set_style_width(o, 3, LV_PART_SCROLLBAR);

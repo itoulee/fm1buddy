@@ -39,54 +39,89 @@ static int stretch(int v, int lo, int hi, int size) {
   return TOUCH_CAL_IN + (v - lo) * (size - 1 - 2 * TOUCH_CAL_IN) / (hi - lo);
 }
 
-// the fingers last read (both of them: the touch controller's), and when they were read
-static hal::Finger seen[2];
+// The panel is read on a task of its own, every TOUCH_EVERY ms: not in LVGL's loop, which reads it only between frames
+// (75-90 ms apart while a list scrolls on the 4"), so a quick flick could start and end between two of them and look
+// like a tap. The task keeps the fingers as they are now, and for LVGL what it would have missed (readTouch)
+#define TOUCH_EVERY 5
+static portMUX_TYPE touchMux = portMUX_INITIALIZER_UNLOCKED;
+static TaskHandle_t touchTaskOf;
+static hal::Finger seen[2];  // the fingers now (the screen's pixels, calibrated)
 static int nSeen;
-static uint32_t seenAt;
-static int16_t rawX, rawY;  // the first finger as the panel has it (a panel LVGL turns wants these: display::rotated)
+static bool downSince;        // a finger was down since LVGL last read (it may be up again now)
+static int16_t downX, downY;  // where the first finger was last
+
+// the console's "touch N": until then, each reading goes to the serial port as the panel gave it, and where it landed
+// on the screen; then the range they covered (to see how near the edges the panel reaches)
+static uint32_t touchLogUntil;
+static int touchLo[2], touchHi[2];
+
+static void touchLog(const touch::Point& p, int x, int y) {
+  Serial.printf("T %u %d: panel %d %d screen %d %d w %u a %u\n", (unsigned)millis(), p.id, p.x, p.y, x, y, p.weight,
+                p.area);
+  touchLo[0] = min(touchLo[0], x), touchHi[0] = max(touchHi[0], x);
+  touchLo[1] = min(touchLo[1], y), touchHi[1] = max(touchHi[1], y);
+}
+
+static void touchLogEnd() {
+  if (touchLogUntil && (int32_t)(millis() - touchLogUntil) >= 0) {
+    touchLogUntil = 0;
+    Serial.printf("TOUCH screen x %d..%d y %d..%d (of %d x %d)\n", touchLo[0], touchHi[0], touchLo[1], touchHi[1], W, H);
+  }
+}
 
 // the fingers as the screen has them: a reading of the panel (touch::read) turned the screen's way (display::toScreen)
-static void readFingers() {
-  if (millis() == seenAt) {
-    return;  // (read once a millisecond at most: LVGL and the controller both ask)
-  }
-  seenAt = millis();
-  nSeen = 0;
+static int readPanel(hal::Finger* out) {
   if (tapUntil && (int32_t)(tapUntil - millis()) > 0) {  // the console's tap is a finger too (calibration, the pads)
-    seen[0] = {tapX, tapY, 0, 32, 2};
-    nSeen = 1;
-    int px, py;
-    display::fromScreen(tapX, tapY, px, py);
-    rawX = (int16_t)px, rawY = (int16_t)py;
-    return;
+    out[0] = {tapX, tapY, 0, 32, 2};
+    return 1;
   }
   touch::Point p[2];
   int n = touch::read(p, 2);
   for (int i = 0; i < n; i++) {
     int x, y;
     display::toScreen(p[i].x, p[i].y, x, y);
-    if (i == 0) {
-      rawX = p[i].x, rawY = p[i].y;  // (the panel's own pixels: what LVGL wants of a panel it turns)
+    if (touchLogUntil) {
+      touchLog(p[i], x, y);
     }
     if (calOn && cal.x1 != cal.x0 && cal.y1 != cal.y0) {
       x = stretch(x, cal.x0, cal.x1, W);
       y = stretch(y, cal.y0, cal.y1, H);
     }
-    hal::Finger& f = seen[nSeen++];
+    hal::Finger& f = out[i];
     f.x = (int16_t)constrain(x, 0, W - 1);
     f.y = (int16_t)constrain(y, 0, H - 1);
     f.id = p[i].id;
     f.weight = p[i].weight;
     f.area = p[i].area;
   }
+  return n;
+}
+
+static void touchTask(void*) {
+  for (;;) {
+    hal::Finger f[2];
+    int n = readPanel(f);
+    portENTER_CRITICAL(&touchMux);
+    nSeen = n;
+    for (int i = 0; i < n; i++) {
+      seen[i] = f[i];
+    }
+    if (n && !tapUntil) {  // (the console's tap goes to LVGL its own way: readTouch)
+      downSince = true;
+      downX = f[0].x, downY = f[0].y;
+    }
+    portEXIT_CRITICAL(&touchMux);
+    vTaskDelay(pdMS_TO_TICKS(TOUCH_EVERY));
+  }
 }
 
 int hal::fingers(Finger* out, int max) {
-  readFingers();
+  portENTER_CRITICAL(&touchMux);
   int n = nSeen < max ? nSeen : max;
   for (int i = 0; i < n; i++) {
     out[i] = seen[i];
   }
+  portEXIT_CRITICAL(&touchMux);
   return n;
 }
 
@@ -108,11 +143,31 @@ static void readTouch(lv_indev_t*, lv_indev_data_t* data) {
     return;
   }
   tapUntil = 0;
-  readFingers();
-  data->state = nSeen ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
-  if (nSeen) {
-    lx = display::rotated() ? rawX : seen[0].x;
-    ly = display::rotated() ? rawY : seen[0].y;
+  // where the finger is now; or, if it was down since the last time and is up now, where it was last first (LVGL then
+  // sees how far it went, and its speed, before it lets go: a flick scrolls), then up (at once: continue_reading)
+  static bool upNext;
+  portENTER_CRITICAL(&touchMux);
+  bool down = nSeen > 0, was = downSince;
+  int16_t x = downX, y = downY;
+  downSince = false;
+  portEXIT_CRITICAL(&touchMux);
+  if (upNext) {
+    upNext = false;
+    data->state = LV_INDEV_STATE_RELEASED;
+  } else if (down || was) {
+    if (display::rotated()) {  // (LVGL turns the panel's own pixels: the calibrated point, back to them)
+      int px, py;
+      display::fromScreen(x, y, px, py);
+      x = (int16_t)px, y = (int16_t)py;
+    }
+    lx = x, ly = y;
+    data->state = LV_INDEV_STATE_PRESSED;
+    if (!down) {
+      upNext = true;
+      data->continue_reading = true;
+    }
+  } else {
+    data->state = LV_INDEV_STATE_RELEASED;
   }
   data->point.x = lx;
   data->point.y = ly;
@@ -129,6 +184,7 @@ void hal::sleep() {
 #endif
   hal::log("sleep: until the screen is touched");
   board::logNow();
+  vTaskSuspend(touchTaskOf);  // (its I2C is touch::sleep's now)
   touch::sleep();
   display::sleep();
   ledcDetach(TFT_BL);
@@ -159,6 +215,7 @@ void setup() {
   lv_indev_t* in = lv_indev_create();
   lv_indev_set_type(in, LV_INDEV_TYPE_POINTER);
   lv_indev_set_read_cb(in, readTouch);
+  xTaskCreatePinnedToCore(touchTask, "touch", 3072, 0, 4, &touchTaskOf, 0);
 
   ui::frame();
 
@@ -223,6 +280,23 @@ static void console() {
         delay(50);
       }
       Serial.printf("BAT pin %d..%d mV, avg %ld (battery about %ld mV)\n", lo, hi, sum / 40, sum / 20);
+    } else if (sscanf(line, "touch %d", &x) == 1) {
+      touchLogUntil = millis() + x * 1000u;  // (the touch task logs them meanwhile: the app runs on)
+      touchLo[0] = touchLo[1] = 9999, touchHi[0] = touchHi[1] = -1;
+    } else if (!strcmp(line, "treg")) {
+      // the touch panel's settings (FT6336: 0x80-0x8F thresholds and rates, 0xA0-0xAF mode and ids)
+      for (int r : {0x80, 0xA0}) {
+        Serial.printf("TREG %02X:", r);
+        for (int i = 0; i < 16; i++) {
+          uint8_t v;
+          Serial.printf(touch::regGet(r + i, v) ? " %02X" : " --", v);
+        }
+        Serial.println();
+      }
+    } else if (sscanf(line, "tset %x %x", &x, &y) == 2) {
+      uint8_t v = 0;
+      bool ok = touch::regSet(x, y) && touch::regGet(x, v);
+      Serial.printf("TSET %02X = %02X%s\n", x, v, ok ? "" : " (failed)");
     } else if (!strcmp(line, "sleep")) {
       hal::sleep();
     } else if (!strcmp(line, "usbmidi")) {
@@ -301,6 +375,7 @@ static void script() {
 
 void loop() {
   console();
+  touchLogEnd();
   script();
   board::loop();
   board::bleLoop();

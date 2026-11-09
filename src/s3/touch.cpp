@@ -91,6 +91,14 @@ void touch::sleep() {
   // (the touch controller is part of the panel: display::sleep's SLPIN has it too)
 }
 
+bool touch::regGet(uint8_t, uint8_t&) {
+  return false;
+}
+
+bool touch::regSet(uint8_t, uint8_t) {
+  return false;
+}
+
 #else
 
 // -------------------------------------------------------------------------------------- the 2.8" and 4" ---
@@ -138,6 +146,23 @@ int touch::read(Point* out, int max) {
     f.area = p[5] >> 4;
   }
   return got;
+}
+
+bool touch::regGet(uint8_t r, uint8_t& v) {
+  Wire.beginTransmission(ADDR);
+  Wire.write(r);
+  if (Wire.endTransmission(false) || Wire.requestFrom(ADDR, 1) != 1) {
+    return false;
+  }
+  v = Wire.read();
+  return true;
+}
+
+bool touch::regSet(uint8_t r, uint8_t v) {
+  Wire.beginTransmission(ADDR);
+  Wire.write(r);
+  Wire.write(v);
+  return !Wire.endTransmission();
 }
 
 void touch::sleep() {
