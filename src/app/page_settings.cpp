@@ -5,8 +5,11 @@
 #include <string.h>
 
 #include "catalog.h"
+#include "fm1.h"
 #include "hal.h"
 #include "jobs.h"
+#include "midi.h"
+#include "uboot.h"
 #include "ui_priv.h"
 
 using namespace ui;
@@ -444,10 +447,109 @@ static void fact(lv_obj_t* parent, const char* name, const std::string& value) {
   lv_obj_set_flex_grow(v, 1);
 }
 
+static lv_obj_t* aboutStatus;
+static uint32_t aboutSeq;
+
+static void identified() {
+  if (jobs::kind == jobs::IDENTIFY) {
+    if (!jobs::ok) {
+      toast(devText(jobs::error).c_str(), true);
+    }
+    go(aboutPage);
+  }
+}
+
+static void identifyTapped(lv_event_t*) {
+  int d = fm1::current();
+  if (d < 0) {
+    toast(devText("No FM-1 on the hub.").c_str(), true);
+  } else if (!jobs::identify(d)) {
+    toast("Busy: try again in a moment.", true);
+  }
+  go(aboutPage);
+}
+
+static void aboutTick() {
+  bool mine = jobs::running && jobs::kind == jobs::IDENTIFY;
+  if (aboutStatus) {
+    lv_label_set_text(aboutStatus, mine ? devText(jobs::status()).c_str() : "");
+    lv_obj_update_flag(aboutStatus, LV_OBJ_FLAG_HIDDEN, !mine);
+  }
+  if (!jobs::running && midi::seq != aboutSeq) {
+    go(aboutPage);  // a device came or went
+  }
+}
+
+// the FM-1: what it runs (over MIDI), and its chip (from its boot loader: the last one opened, kept)
+static void aboutFm1(lv_obj_t* body) {
+  const Theme& t = theme();
+  label(body, devText("FM-1").c_str(), &lv_font_montserrat_16, t.text);
+  int d = fm1::current();
+  const Fm1Id* id = d >= 0 ? fm1::known(d) : 0;
+  bool mine = jobs::running && jobs::kind == jobs::IDENTIFY;
+  fact(body, "Firmware",
+       mine ? "in its boot loader" : id   ? id->text
+                                 : d >= 0 ? "on the hub"
+                                          : devText("no FM-1 on the hub"));
+  uboot::Chip c;
+  if (uboot::lastChip(c)) {
+    char s[64];
+    bool keyOk = c.key == FM1_KEY;
+    snprintf(s, sizeof s, keyOk ? "%04X (JieLi WL82)" : "%04X (not the FM-1's)", c.key);
+    fact(body, "Chip key", s);
+    const char* part = uboot::flashName(c.flashId);
+    unsigned kib = (unsigned)(c.size / 1024);
+    snprintf(s, sizeof s, kib % 1024 ? "%s%s%u KiB" : "%s%s%u MiB", part ? part : "", part ? ", " : "",
+             kib % 1024 ? kib : kib / 1024);
+    fact(body, "Flash", s);
+    snprintf(s, sizeof s, "%06X", (unsigned)c.flashId);
+    fact(body, "JEDEC ID", s);
+    if (!uboot::fm1Flash(c.flashId)) {
+      fact(body, "", "A flash chip fm1buddy doesn't know: recovery won't write it.");
+    }
+    std::string uid = uboot::uidText(c);
+    if (!uid.empty()) {
+      fact(body, "Unique ID", uid);
+    }
+    if (c.rom[0]) {
+      fact(body, "Boot ROM", c.rom);
+    }
+    if (c.mhz) {
+      snprintf(s, sizeof s, "%u MHz", c.mhz);
+      fact(body, "CPU", s);
+    }
+  } else {
+    fact(body, "Chip", "not read yet");
+  }
+  int others = 0;
+  for (int o = 0; o < MIDI_USB; o++) {
+    midi::Dev v;
+    others += o != d && midi::dev(o, v);
+  }
+  lv_obj_t* row = box(body, LV_FLEX_FLOW_ROW);
+  lv_obj_set_style_pad_top(row, 6, 0);
+  lv_obj_t* b = button(row, LV_SYMBOL_REFRESH " Identify", identifyTapped);
+  if (jobs::running || d < 0 || others) {
+    lv_obj_add_state(b, LV_STATE_DISABLED);
+  }
+  aboutStatus = label(body, mine ? devText(jobs::status()).c_str() : "", &lv_font_montserrat_14, t.accent);
+  lv_obj_update_flag(aboutStatus, LV_OBJ_FLAG_HIDDEN, !mine);
+  const char* how = others ? "Unplug the other USB devices: the FM-1 has to be alone on the hub."
+                           : "Identify reads its chip through its boot loader (as a backup does), then it restarts. "
+                             "Nothing on it changes. Backups and recovery read it too.";
+  lv_obj_t* l = label(body, devText(how).c_str(), &lv_font_montserrat_12, others ? t.knob[0] : t.dim);
+  lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(l, LV_PCT(100));
+}
+
 static void aboutPage(lv_obj_t* page) {
   header(page, "About", settingsPage);
   lv_obj_t* body = scroller(page);
-  fact(body, "fm1buddy", FM1BUDDY_VERSION);
+  aboutSeq = midi::seq;
+  aboutFm1(body);
+  lv_obj_t* h = label(body, "fm1buddy", &lv_font_montserrat_16, theme().text);
+  lv_obj_set_style_pad_top(h, 10, 0);
+  fact(body, "Version", FM1BUDDY_VERSION);
   uint64_t total, used;
   char s[48];
   if (hal::sd() && hal::sdSpace(total, used)) {
@@ -459,6 +561,8 @@ static void aboutPage(lv_obj_t* page) {
   fact(body, "Firmwares", std::to_string(catalog::sd.size()) + " in /fm1");
   fact(body, "Hub list", catalog::hub.empty() ? "not yet" : std::to_string(catalog::hub.size()) + ", from " + catalog::hubUpdated);
   fact(body, "Hub", "mutant.cloud");
+  tick = aboutTick;
+  jobDone = identified;
 }
 
 // ------------------------------------------------------------------------------------------ start on ---

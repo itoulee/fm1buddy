@@ -48,7 +48,7 @@ static void progress(uint32_t d, uint32_t t) {
   total = t;
 }
 
-static const char* NAMES[] = {"none", "hub", "download", "scan", "join", "install", "probe", "send", "voice", "keep", "restore", "export", "backup", "prepare", "recover", "sloop backup", "sloop restore", "sloop project", "sloop samples"};
+static const char* NAMES[] = {"none", "hub", "download", "scan", "join", "install", "probe", "send", "voice", "keep", "restore", "export", "backup", "prepare", "recover", "sloop backup", "sloop restore", "sloop project", "sloop samples", "identify"};
 
 // a conversation in SysEx with the FM-1: routing stops meanwhile (its replies aren't for the other devices, and a
 // keyboard that doesn't take them in holds up the USB for everyone; nothing else lands in the middle of a message)
@@ -596,11 +596,12 @@ static bool saveBackup(const std::vector<uint8_t>& a, const uboot::Chip& chip, c
   }
   if (ok) {
     f = fopen((base + ".txt").c_str(), "w");
+    const char* part = uboot::flashName(chip.flashId);
     ok = f && fprintf(f,
                       "fm1buddy backup: all of the %s's flash, through its boot loader\n"
-                      "firmware %s\nchip key %04X\nflash    %06X, %u bytes\nsha256   %s\n",
+                      "firmware %s\nchip key %04X\nflash    %06X, %u bytes%s%s\nflash id %s\nsha256   %s\n",
                       smk ? "SMK-37" : "FM-1", was.empty() ? "?" : was.c_str(), chip.key, (unsigned)chip.flashId,
-                      (unsigned)chip.size, sha) > 0;
+                      (unsigned)chip.size, part ? ", " : "", part ? part : "", uboot::uidText(chip).c_str(), sha) > 0;
     ok &= f && !fclose(f);
   }
   if (!ok) {
@@ -653,6 +654,43 @@ static void backupJob(void*) {
     return finish(false);
   }
   finish(saveBackup(a, chip, was, false, was));
+}
+
+// IDENTIFY: into its boot loader and straight back, for what it says of its chip (uboot::attach keeps it: lastChip)
+static void identifyJob(void*) {
+  const Fm1Id* id = fm1::known(device);
+  step = BOOT_LOADER;
+  hal::bleHold(true);
+  uboot::Chip chip;
+  const char* e = uboot::enter(device, chip);
+  if (!e) {
+    fmStart(id && isSmk(id->model), "IDENTIFY");
+    char flash[24];
+    snprintf(flash, sizeof flash, "FLASH %06X", (unsigned)chip.flashId);
+    fmShow(flash, -1, true);
+    fmOn = false;
+  }
+  step = LEAVING;
+  uboot::leave();
+  for (uint32_t start = hal::millis(); uboot::stuck() && hal::millis() - start < 3000;) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+  hal::bleHold(false);
+  if (e) {
+    bool stuck = uboot::stuck();
+    hal::usbRestart();
+    error = std::string(e) + (stuck ? " Switch the FM-1 off and on to get it back." : "");
+    return finish(false);
+  }
+  finish(true);
+}
+
+bool jobs::identify(int d) {
+  if (running) {
+    return false;
+  }
+  device = d;
+  return start(IDENTIFY, identifyJob);
 }
 
 bool jobs::backup(int d) {
