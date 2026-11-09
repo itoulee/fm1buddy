@@ -45,11 +45,11 @@ static struct {
   std::vector<bool> got;
   // fomajam: its song (a version 9 one is 11914 bytes, starting with 9 and the tempo), its kits, and one coming in
   bool fomajam, playing;
-  bool sloop;    // it runs SLOOP (its editor protocol: sloopAnswer)
-  bool felucca;  // ... or plain Felucca (the same, but 3 sample slots, no backups)
-  bool lostCal;  // its flash's SMK-37 calibration sector is blank (an SMK-37 that lost it: it looks like an FM-1)
-  bool smk;      // it's an SMK-37 Elite on its stock firmware (the FM-1's chip and update, its own name)
-  bool bigscreen;  // its firmware has Big Screen: it sends its screen while asked (mirror.h)
+  bool sloop;            // it runs SLOOP (its editor protocol: sloopAnswer)
+  bool felucca;          // ... or plain Felucca (the same, but 3 sample slots, no backups)
+  bool lostCal;          // its flash's SMK-37 calibration sector is blank (an SMK-37 that lost it: it looks like an FM-1)
+  bool smk;              // it's an SMK-37 Elite on its stock firmware (the FM-1's chip and update, its own name)
+  bool bigscreen;        // its firmware has Big Screen: it sends its screen while asked (mirror.h)
   uint32_t screenUntil;  // asked until then
   bool screenAll;        // send all of it, not just what changed
   std::vector<uint8_t> song, kits, in;
@@ -742,6 +742,16 @@ bool fake::storage(const uint8_t* cdb, uint8_t cdbLen, bool in, uint8_t* buf, ui
   }
   if (cmd == 0xFC0A) {  // GET_ONLINE_DEVICE: SPI NOR, 0x856014
     buf[2] = 3, buf[4] = 0x14, buf[5] = 0x60, buf[6] = 0x85;
+    return true;
+  }
+  if (cmd == 0xFC40) {  // IDENTIFY: our loader, at 160 MHz
+    memcpy(buf + 2, "MFLR1.3", 7);
+    buf[15] = 160;
+    return true;
+  }
+  if (cmd == 0xFC42) {  // the flash's unique ID
+    static const uint8_t UID[8] = {0x31, 0x4E, 0x0A, 0x9C, 0x52, 0x17, 0x28, 0xC3};
+    memcpy(buf + 2, UID, 8);
     return true;
   }
   if (cmd == 0xFC14) {  // GET_USB_BUFFER_SIZE: 4 KiB (big endian)

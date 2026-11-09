@@ -28,7 +28,18 @@ struct Chip {
   uint32_t flashId;  // its flash's JEDEC id (0x856014, 0xB36014 or 0xEB6014: 1 MiB)
   uint32_t size;     // the flash's size
   uint32_t io;       // the most a read moves at once: its loader's USB buffer (512 if it doesn't say)
+  uint8_t uid[8];    // the flash's factory-unique ID (all 0: it didn't say)
+  uint8_t mhz;       // the CPU clock the loader runs it at (0: it didn't say)
+  char rom[24];      // its boot ROM, as it says on USB ("WL80UBOOT1.00")
+  char loader[8];    // the loader's version ("1.3")
 };
+// the flash's maker and part, by its JEDEC id ("Puya P25Q80H"), or 0 if it isn't known
+const char* flashName(uint32_t id);
+// its unique ID as hex ("" if it didn't say)
+std::string uidText(const Chip& chip);
+// the chip of the last FM-1 or SMK-37 its boot loader was opened on (a backup, a recovery, Identify): kept across
+// restarts. False if there's been none
+bool lastChip(Chip& chip);
 // device d (an FM-1, alone on the hub) into its boot loader, and the loader running in it; 0 or an error
 const char* enter(int d, Chip& chip);
 // the same with the FM-1 already in its boot loader (recovery: hal.h keyState), or on its way there

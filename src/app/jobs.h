@@ -12,24 +12,25 @@
 
 namespace jobs {
 enum Kind { NONE,
-            HUB,              // update the Hub's list
-            DOWNLOAD,         // a Hub firmware to /fm1
-            SCAN,             // the Wi-Fi networks
-            JOIN,             // try a Wi-Fi network (Settings)
-            INSTALL,          // a firmware on the FM-1 (downloaded first, from the Hub, if it isn't on the SD card)
-            PROBE,            // what a device's firmware speaks (sounds.h)
-            SEND,             // a .syx to a device
-            VOICE,            // the stock firmware's current voice to the SD card
-            KEEP,             // what a firmware shares (fomajam's song) into a new setup
-            RESTORE,          // a setup back to it
-            EXPORT,           // a setup's patterns as MIDI files, its kits as .wav files
-            BACKUP,           // all of the FM-1's flash to the SD card (through its boot loader: uboot.h)
-            PREPARE,          // recovery: what goes on it is kept, then the board restarts into recovery mode
-            RECOVER,          // recovery mode: a firmware or a backup onto the FM-1, through its boot loader
-            SLOOP_BACKUP,     // SLOOP: a backup of it, in SLOOP's file (sloop.h)
-            SLOOP_RESTORE,    // SLOOP: a backup onto it (backed up first)
-            SLOOP_PROJECT,    // SLOOP: one project of a backup onto it
-            SLOOP_SAMPLES };  // SLOOP: .wav files into a sample slot
+            HUB,            // update the Hub's list
+            DOWNLOAD,       // a Hub firmware to /fm1
+            SCAN,           // the Wi-Fi networks
+            JOIN,           // try a Wi-Fi network (Settings)
+            INSTALL,        // a firmware on the FM-1 (downloaded first, from the Hub, if it isn't on the SD card)
+            PROBE,          // what a device's firmware speaks (sounds.h)
+            SEND,           // a .syx to a device
+            VOICE,          // the stock firmware's current voice to the SD card
+            KEEP,           // what a firmware shares (fomajam's song) into a new setup
+            RESTORE,        // a setup back to it
+            EXPORT,         // a setup's patterns as MIDI files, its kits as .wav files
+            BACKUP,         // all of the FM-1's flash to the SD card (through its boot loader: uboot.h)
+            PREPARE,        // recovery: what goes on it is kept, then the board restarts into recovery mode
+            RECOVER,        // recovery mode: a firmware or a backup onto the FM-1, through its boot loader
+            SLOOP_BACKUP,   // SLOOP: a backup of it, in SLOOP's file (sloop.h)
+            SLOOP_RESTORE,  // SLOOP: a backup onto it (backed up first)
+            SLOOP_PROJECT,  // SLOOP: one project of a backup onto it
+            SLOOP_SAMPLES,  // SLOOP: .wav files into a sample slot
+            IDENTIFY };     // the FM-1's chip, through its boot loader, and back (uboot::lastChip)
 enum Step { IDLE,
             JOINING,
             FETCHING,
@@ -110,7 +111,8 @@ bool voice(int d);
 bool keep(int d);
 bool restore(int d, const std::string& setup);  // in /setups
 bool exportSetup(const std::string& setup, const char* app);
-bool backup(int d);  // device d: the FM-1
+bool backup(int d);    // device d: the FM-1
+bool identify(int d);  // device d: the FM-1
 // recovery: what goes on the FM-1 (a .fwsc in /fm1, or a backup's .bin in /backups) is kept, and the board restarts
 // into recovery mode
 bool prepare(const std::string& from);

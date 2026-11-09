@@ -32,6 +32,14 @@ jobs:
             mkdir -p ~/pi32v2 && tar -xJf /tmp/pi32v2.tar.xz -C ~/pi32v2 --strip-components=1
           fi
       - run: cp src/app/mflr_loader.h /tmp/ && PI32V2_TOOLCHAIN=~/pi32v2 loader/build.sh && cp /tmp/mflr_loader.h src/app/
+      # PlatformIO's platforms and toolchains (GitHub release downloads): kept, so a slow GitHub doesn't fail the build
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: platformio-${{ hashFiles('platformio.ini') }}
+          restore-keys: platformio-
       # Settings > About shows it: the tag on a release, else the commit
       - run: pio run -e cyd-s3 -e cyd-s3-35 -e cyd-s3-4
         env:

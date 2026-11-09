@@ -15,6 +15,7 @@
 #define LOADER_AT 0x1C20000u  // where it links (loader/build.sh), and is run: the first of its two 32 KiB slots
 #define LOADER_MAX 0x8000u
 #define IO 512
+#define CHIP_KEY_NAME "chip"  // (hal::save's: the last chip seen)
 
 // the ROM's
 #define WRITE_MEMORY 0xFB06
@@ -26,6 +27,8 @@
 #define READ_KEY 0xFC09
 #define GET_ONLINE_DEVICE 0xFC0A
 #define GET_USB_BUFFER 0xFC14
+#define IDENTIFY 0xFC40
+#define UNIQUE_ID 0xFC42
 // the loader's screen (loader/src/loader.c)
 #define SCREEN_INIT 0xFC43
 #define SCREEN_ROW 0xFC44
@@ -85,6 +88,18 @@ static bool exec(uint16_t cmd, const uint8_t* args, int n, uint8_t resp[16], int
   return false;
 }
 
+// n bytes of an INQUIRY's text, without the spaces after it (and anything that isn't text)
+static std::string trimmed(const uint8_t* p, int n) {
+  std::string s;
+  for (int i = 0; i < n && p[i]; i++) {
+    s += p[i] >= ' ' && p[i] <= '~' ? (char)p[i] : '?';
+  }
+  while (!s.empty() && s.back() == ' ') {
+    s.pop_back();
+  }
+  return s;
+}
+
 const char* uboot::enter(int d, Chip& chip) {
   // alone on the hub: the FM-1 doesn't take the key with another full-speed device there
   for (int o = 0; o < MIDI_USB; o++) {
@@ -139,6 +154,11 @@ const char* uboot::attach(Chip& chip) {
     return "Its boot loader didn't answer.";
   }
   hal::log("uboot: %.8s %.16s %.4s", (const char*)inq + 8, (const char*)inq + 16, (const char*)inq + 32);
+  // its vendor and product, as it gives them ("WL80UBOOT1.00"), to show
+  std::string rom = trimmed(inq + 8, 8), product = trimmed(inq + 16, 16);
+  rom += rom.empty() || product.empty() ? product : " " + product;
+  memset(chip.rom, 0, sizeof chip.rom);
+  snprintf(chip.rom, sizeof chip.rom, "%s", rom.c_str());
   // the loader into its RAM, a piece at a time, ciphered as the ROM deciphers what it's given; and run
   uint8_t piece[IO];
   for (uint32_t off = 0; off < MFLR_LOADER_LEN; off += IO) {
@@ -208,9 +228,55 @@ const char* uboot::attach(Chip& chip) {
       hal::log("uboot: reads of %u don't work", (unsigned)io);
     }
   }
-  hal::log("uboot: chip key %04X, flash %06X (%u KiB), reads of %u", chip.key, (unsigned)chip.flashId,
-           (unsigned)chip.size / 1024, (unsigned)chip.io);
+  // what the loader says of itself (its version, the CPU clock) and the flash's unique ID: only to show, so a loader
+  // that doesn't know them is fine
+  chip.mhz = 0;
+  memset(chip.loader, 0, sizeof chip.loader);
+  if (exec(IDENTIFY, 0, 0, resp, 1, 1000) && !memcmp(resp + 2, "MFLR", 4)) {
+    memcpy(chip.loader, resp + 6, 3);
+    chip.mhz = resp[15];
+  }
+  memset(chip.uid, 0, sizeof chip.uid);
+  if (exec(UNIQUE_ID, 0, 0, resp, 1, 1000)) {
+    bool blank = true;
+    for (int i = 0; i < 8; i++) {
+      blank &= resp[2 + i] == 0 || resp[2 + i] == 0xFF;
+    }
+    if (!blank) {
+      memcpy(chip.uid, resp + 2, 8);
+    }
+  }
+  hal::log("uboot: chip key %04X, flash %06X (%u KiB), reads of %u, uid %s, %u MHz, rom %s", chip.key,
+           (unsigned)chip.flashId, (unsigned)chip.size / 1024, (unsigned)chip.io, uidText(chip).c_str(), chip.mhz,
+           chip.rom);
+  hal::save(CHIP_KEY_NAME, &chip, sizeof chip);
   return 0;
+}
+
+const char* uboot::flashName(uint32_t id) {
+  switch (id) {
+    case FM1_FLASH:
+      return "Puya P25Q80";
+    case FM1_FLASH_2:
+      return "UCUN UC25HQ80";
+  }
+  return 0;
+}
+
+std::string uboot::uidText(const Chip& chip) {
+  std::string s;
+  bool any = false;
+  for (uint8_t b : chip.uid) {
+    char h[3];
+    snprintf(h, sizeof h, "%02X", b);
+    s += h;
+    any |= b != 0;
+  }
+  return any ? s : "";
+}
+
+bool uboot::lastChip(Chip& chip) {
+  return hal::load(CHIP_KEY_NAME, &chip, sizeof chip) && chip.flashId;
 }
 
 const char* uboot::read(const Chip& chip, std::vector<uint8_t>& out, void (*progress)(uint32_t, uint32_t)) {
