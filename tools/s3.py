@@ -10,6 +10,8 @@
 #                                meanwhile, as the console can't: "tap X Y", "drag X1 Y1 X2 Y2" and "wait MS" between ';'
 #   tools/s3.py disk             restart it as a USB disk for this computer: prints where its SD card is mounted
 #   tools/s3.py eject            eject that disk: it comes back here by itself (waits for its serial port)
+#   tools/s3.py touch [SECS]     print the touch panel's own readings for SECS (10) s, and their range: run a finger
+#                                along the edges to see how far it reaches
 #   tools/s3.py usbmidi          restart it as a USB MIDI device for this computer (Settings > On a computer)
 #   tools/s3.py serial           and back: sends it the SysEx that brings the serial port back (needs python-rtmidi)
 #
@@ -152,9 +154,14 @@ if __name__ == '__main__':
         disk()
     elif a == ['eject']:
         eject()
+    elif a[:1] == ['touch'] and len(a) <= 2:
+        n = int(a[1]) if len(a) == 2 else 10
+        command('touch %d' % n, n + 1)
+    elif a == ['treg'] or (a[:1] == ['tset'] and len(a) == 3):
+        command(' '.join(a), 1)
     elif a == ['usbmidi']:
         command('usbmidi', 0.5)
     elif a == ['serial']:
         to_serial()
     else:
-        sys.exit('tools/s3.py shot FILE | tap X Y | drag X1 Y1 X2 Y2 | log | cat PATH | ls [PATH] | host [SCRIPT] | disk | eject | usbmidi | serial')
+        sys.exit('tools/s3.py shot FILE | tap X Y | drag X1 Y1 X2 Y2 | log | cat PATH | ls [PATH] | host [SCRIPT] | disk | eject | touch [SECS] | usbmidi | serial')

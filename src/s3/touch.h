@@ -16,6 +16,9 @@ struct Point {
 void begin();
 // the fingers on it now, as many as fit in max
 int read(Point* out, int max);
+// one of its 8-bit registers (the FT6336's; false on the 3.5"), for the console
+bool regGet(uint8_t r, uint8_t& v);
+bool regSet(uint8_t r, uint8_t v);
 // the panel asleep too, before the chip's deep sleep: its interrupt off (hal::sleep)
 void sleep();
 }  // namespace touch
