@@ -16,6 +16,15 @@
 #define SCREEN_H 240
 #endif
 
+// fm1buddy's version (CI sets it: the release's tag, "v0.1.36", or the commit), and the installer .bin of this
+// board's size, as releases and the installer page name it (platformio.ini sets it a board)
+#ifndef FM1BUDDY_VERSION
+#define FM1BUDDY_VERSION "dev"
+#endif
+#ifndef FM1BUDDY_BIN
+#define FM1BUDDY_BIN "fm1buddy-cyd-s3.bin"
+#endif
+
 namespace hal {
 uint32_t millis();
 // a line for the serial console (the terminal, in the simulator)
@@ -60,6 +69,12 @@ bool wifiOn();
 int get(const char* url, const char* path, std::string* etag, void (*progress)(uint32_t done, uint32_t total),
         std::string& err);
 bool sha256(const char* path, char hex[65]);
+// fm1buddy's own update: an installer .bin (path: the whole flash image from 0, as the installer page writes it) into
+// the app slot it isn't running from, to start from that one next time; 0 or an error. Nothing else on the flash
+// changes (the settings, Wi-Fi's too, stay). progress may be 0
+const char* selfUpdate(const char* path, void (*progress)(uint32_t done, uint32_t total));
+// start again (after selfUpdate: the new firmware)
+void reboot();
 bool sha256(const uint8_t* p, size_t n, char hex[65]);
 // the files in a folder with their size and time (st_size, st_mtime as stat has them), from one read of the folder
 // (not a search of it a file): fn for each. false if it didn't read to its end

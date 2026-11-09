@@ -15,10 +15,6 @@
 #define HEAD_H 34
 #define ROW_H 44
 
-#ifndef FM1BUDDY_VERSION
-#define FM1BUDDY_VERSION "dev"
-#endif
-
 namespace ui {
 enum Tab { FIRMWARE,
            MIDI,
@@ -75,7 +71,7 @@ enum Start { START_FIRMWARE,  // the SD card's firmwares (no Wi-Fi needed)
              START_MAPPING,
              START_TOUCH,  // the touch controller's X/Y pad
              START_SOUNDS,
-             START_HUB,   // the Hub's firmwares
+             START_HUB,     // the Hub's firmwares
              START_PADS,    // the touch controller's pads
              START_SCREEN,  // the FM-1's screen (mirror.h)
              STARTS };
@@ -99,6 +95,7 @@ void slotsPage(lv_obj_t* page);        // Felucca and the firmwares built on it:
 void syxPage(lv_obj_t* page);          // a .syx
 void setupPage(lv_obj_t* page);        // a setup
 void settingsPage(lv_obj_t* page);
+void settingsLeft();  // a tab other than Settings: what Settings offered is forgotten
 void wifiPage(lv_obj_t* page);
 void backupPage(lv_obj_t* page);        // all of the FM-1's flash to the SD card
 bool hasBackup();                       // a backup of it is on the SD card

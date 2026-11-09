@@ -1,5 +1,6 @@
 #include "jobs.h"
 
+#include <ArduinoJson.h>
 #include <ctype.h>
 #include <dirent.h>
 #include <stdio.h>
@@ -48,7 +49,10 @@ static void progress(uint32_t d, uint32_t t) {
   total = t;
 }
 
-static const char* NAMES[] = {"none", "hub", "download", "scan", "join", "install", "probe", "send", "voice", "keep", "restore", "export", "backup", "prepare", "recover", "sloop backup", "sloop restore", "sloop project", "sloop samples", "identify"};
+static const char* NAMES[] = {"none", "hub", "download", "scan", "join", "install", "probe", "send", "voice", "keep",
+                              "restore", "export", "backup", "prepare", "recover", "sloop backup", "sloop restore",
+                              "sloop project", "sloop samples", "identify", "check update", "update"};
+static_assert(sizeof NAMES / sizeof *NAMES == UPDATE + 1, "a name for each job");
 
 // a conversation in SysEx with the FM-1: routing stops meanwhile (its replies aren't for the other devices, and a
 // keyboard that doesn't take them in holds up the USB for everyone; nothing else lands in the middle of a message)
@@ -180,6 +184,124 @@ static void hubJob(void*) {
   }
   hal::logRam("the list read");
   finish(ok);
+}
+
+// ------------------------------------------------------------------------------------- fm1buddy's update ---
+// the installer page: its version.json says the newest release ({"tag": "v0.1.37", "files": {"fm1buddy-cyd-s3.bin":
+// sha256, ...}}), and the release's .bins are next to it (as the installer writes them: all of the flash from 0)
+#define UPDATE_SITE "https://konsumer.js.org/fm1buddy/fw/"
+#define UPDATE_INFO DATA_DIR "/version.json"
+#define UPDATE_BIN DATA_DIR "/update.bin"
+std::string jobs::updateTag;
+static std::string updateSha;  // the newer release's sha256 of this board's .bin ("" if the page doesn't say)
+
+// "v0.1.37" as numbers; false if it isn't a release's version
+static bool versionOf(const std::string& v, int n[3]) {
+  return sscanf(v.c_str(), "v%d.%d.%d", &n[0], &n[1], &n[2]) == 3;
+}
+
+bool jobs::newer(const std::string& a, const std::string& b) {
+  int x[3], y[3];
+  if (!versionOf(a, x)) {
+    return false;
+  }
+  if (!versionOf(b, y)) {
+    return true;
+  }
+  return std::lexicographical_compare(y, y + 3, x, x + 3);
+}
+
+static void checkUpdateJob(void*) {
+  updateTag.clear();
+  if (!hal::sd()) {
+    error = "No SD card: the update goes on it first.";
+    return finish(false);
+  }
+  if (!joinSaved()) {
+    return finish(false);
+  }
+  mkdirs();
+  step = FETCHING;
+  std::string p = catalog::path(UPDATE_INFO);
+  int code = hal::get(UPDATE_SITE "version.json", p.c_str(), 0, 0, error);
+  hal::log("job: version.json: HTTP %d", code);
+  if (code != 200) {
+    if (code > 0) {
+      error = "The installer page said " + std::to_string(code) + ".";
+    }
+    return finish(false);
+  }
+  JsonDocument doc;
+  FILE* f = fopen(p.c_str(), "r");
+  std::string text;
+  char buf[256];
+  for (size_t n; f && (n = fread(buf, 1, sizeof buf, f)) > 0;) {
+    text.append(buf, n);
+  }
+  if (f) {
+    fclose(f);
+  }
+  std::string tag;
+  if (deserializeJson(doc, text) || (tag = doc["tag"] | "").empty()) {
+    error = "The installer page's version didn't read.";
+    return finish(false);
+  }
+  // a release from before it listed its files has the 2.8"'s, at least; the others only if it says so
+  JsonVariant files = doc["files"];
+  bool listed = files.is<JsonObject>();
+  bool there = listed ? files[FM1BUDDY_BIN].is<const char*>() : !strcmp(FM1BUDDY_BIN, "fm1buddy-cyd-s3.bin");
+  hal::log("job: newest %s (this is %s), %s %s", tag.c_str(), FM1BUDDY_VERSION, FM1BUDDY_BIN,
+           there ? "there" : "not there");
+  if (there && newer(tag, FM1BUDDY_VERSION)) {
+    updateTag = tag;
+    updateSha = listed ? (const char*)(files[FM1BUDDY_BIN] | "") : "";
+  }
+  finish(true);
+}
+
+bool jobs::checkUpdate() {
+  return start(CHECK_UPDATE, checkUpdateJob);
+}
+
+static void updateJob(void*) {
+  if (!hal::sd()) {
+    error = "No SD card: the update goes on it first.";
+    return finish(false);
+  }
+  if (!joinSaved()) {
+    return finish(false);
+  }
+  mkdirs();
+  step = FETCHING;
+  std::string p = catalog::path(UPDATE_BIN);
+  int code = hal::get(UPDATE_SITE FM1BUDDY_BIN, p.c_str(), 0, progress, error);
+  hal::log("job: %s: HTTP %d", FM1BUDDY_BIN, code);
+  if (code != 200) {
+    if (code > 0) {
+      error = "The installer page said " + std::to_string(code) + ".";
+    }
+    return finish(false);
+  }
+  step = CHECKING;
+  char sum[65];
+  if (!updateSha.empty() && (!hal::sha256(p.c_str(), sum) || strcasecmp(sum, updateSha.c_str()))) {
+    remove(p.c_str());
+    error = "The download isn't what the installer page says it is (sha256).";
+    return finish(false);
+  }
+  step = UPDATING;
+  done = total = 0;
+  const char* e = hal::selfUpdate(p.c_str(), progress);
+  remove(p.c_str());
+  if (e) {
+    error = e;
+    return finish(false);
+  }
+  finish(true);
+}
+
+bool jobs::update() {
+  return !updateTag.empty() && start(UPDATE, updateJob);
 }
 
 // target from the Hub into /fm1: false (error says why)
@@ -1091,6 +1213,9 @@ std::string jobs::status() {
       if (kind == HUB) {
         return "Getting the Hub's list...";
       }
+      if (kind == CHECK_UPDATE) {
+        return "Checking for an update...";
+      }
       if (kind == INSTALL) {
         uint32_t t = total, d = done;
         return "Downloading" + (t ? " " + std::to_string((unsigned long long)d * 100 / t) + "%" : std::string("..."));
@@ -1100,6 +1225,10 @@ std::string jobs::status() {
     }
     case CHECKING:
       return "Checking it...";
+    case UPDATING: {
+      uint32_t t = total, d = done;
+      return "Installing " + std::to_string(t ? (unsigned long long)d * 100 / t : 0) + "%: keep it powered";
+    }
     case ASKING:
       return "Looking for the FM-1...";
     case VERIFYING:

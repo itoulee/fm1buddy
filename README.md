@@ -38,6 +38,8 @@ No soldering or assembly needed, just get a cheap [Freenove ESP32-S3 2.8"](https
 
 **Install it, and how to set it up:** <https://konsumer.github.io/fm1buddy/>
 
+**Update it:** Settings > Update > Check for update, over Wi-Fi (its size's release, through the SD card). Installing again from the page keeps its settings (Wi-Fi's too), unless you choose to erase it.
+
 <table>
   <tr>
     <td><img src="docs/screens/firmware-hub.png" width="260" alt="The Firmware Hub's list" /></td>
