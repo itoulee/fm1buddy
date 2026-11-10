@@ -1,6 +1,7 @@
 #include "catalog.h"
 
 #include <ArduinoJson.h>
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
@@ -764,6 +765,54 @@ void catalog::hashSd() {
 
 bool catalog::sdHashed() {
   return hashedNew.exchange(false);
+}
+
+std::string catalog::stem(const std::string& file) {
+  std::string s;
+  for (char c : baseName(file)) {
+    s += (char)tolower((unsigned char)c);
+  }
+  if (s.size() > 5 && !s.compare(s.size() - 5, 5, ".fwsc")) {
+    s.resize(s.size() - 5);
+  }
+  // up to a separator followed by a number ("-2.4.4", "_v1.2")
+  for (size_t k = 1; k + 1 < s.size(); k++) {
+    char n = s[k + 1] == 'v' && k + 2 < s.size() ? s[k + 2] : s[k + 1];
+    if (strchr("-_. ", s[k]) && isdigit((unsigned char)n)) {
+      return s.substr(0, k);
+    }
+  }
+  return s;
+}
+
+int catalog::hubVersionOf(const FwList& hub, const FwList& sd, size_t i) {
+  if (i >= sd.size()) {
+    return -1;
+  }
+  const FwItem& f = sd[i];
+  const char* prod = sd.str(f.product);
+  if (!*prod) {
+    return -1;  // (not a package)
+  }
+  std::string name = stem(sd.str(f.file));
+  int same = -1, only = -1, ids = 0;
+  for (size_t h = 0; h < hub.size(); h++) {
+    const FwItem& x = hub[h];
+    if (*sd.str(f.sha256) && !strcasecmp(hub.str(x.sha256), sd.str(f.sha256))) {
+      return (int)h;  // the very file
+    }
+    if (strcasecmp(hub.str(x.product), prod)) {
+      continue;
+    }
+    ids++;
+    only = (int)h;
+    // (two of the same name: a release and a beta, say: the newest)
+    if (stem(hub.str(x.file)) == name && (same < 0 || strcmp(hub.str(x.date), hub.str(hub[same].date)) > 0)) {
+      same = (int)h;
+    }
+  }
+  return same >= 0 ? same : ids == 1 ? only
+                                     : -1;
 }
 
 void catalog::scanSd() {
