@@ -87,6 +87,11 @@ void hashSd();
 bool sdHashed();
 // all of item i of list l (what it is, where it comes from: read from HUB_LIST)
 Firmware details(const FwList& l, size_t i);
+// a firmware's name from its file: without the version, lower case ("ZP12-2.4.4.fwsc" -> "zp12")
+std::string stem(const std::string& file);
+// the Hub's firmware that SD card firmware i is a version of: the same device ID and the same name (stem), else the
+// only one in the Hub's list with that ID; -1 if none
+int hubVersionOf(const FwList& hub, const FwList& sd, size_t i);
 // the device a package is for, from its own header ("FM-1_974"), "" if it isn't a package
 std::string product(const char* path);
 }  // namespace catalog

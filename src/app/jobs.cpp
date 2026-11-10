@@ -51,7 +51,7 @@ static void progress(uint32_t d, uint32_t t) {
 
 static const char* NAMES[] = {"none", "hub", "download", "scan", "join", "install", "probe", "send", "voice", "keep",
                               "restore", "export", "backup", "prepare", "recover", "sloop backup", "sloop restore",
-                              "sloop project", "sloop song", "sloop song in", "sloop samples", "identify", "check update", "update"};
+                              "sloop project", "sloop song", "sloop song in", "sloop samples", "identify", "check update", "firmware update", "update"};
 static_assert(sizeof NAMES / sizeof *NAMES == UPDATE + 1, "a name for each job");
 
 // a conversation in SysEx with the FM-1: routing stops meanwhile (its replies aren't for the other devices, and a
@@ -346,6 +346,25 @@ static void downloadJob(void*) {
   finish(fetch());
 }
 
+static std::string oldFile;  // FW_UPDATE: what the new one replaces
+
+static void fwUpdateJob(void*) {
+  std::string file = target.file, dir = catalog::path(FW_DIR "/");
+  target.file += ".part";  // (old stays until the new one is checked, even with the same name)
+  if (!fetch()) {
+    remove((dir + target.file).c_str());
+    return finish(false);
+  }
+  remove((dir + oldFile).c_str());
+  if (rename((dir + target.file).c_str(), (dir + file).c_str())) {
+    error = "Can't name it " + file + " on the SD card.";
+    return finish(false);
+  }
+  target.file = file;
+  hal::log("job: %s replaced by %s", oldFile.c_str(), file.c_str());
+  finish(true);
+}
+
 static std::atomic<uint32_t> askedAt;  // the update loader's last request (hal::millis)
 
 static void installProgress(Fm1Step s, uint32_t bytes, uint32_t) {
@@ -453,6 +472,15 @@ bool jobs::download(const Firmware& f) {
   }
   target = f;
   return start(DOWNLOAD, downloadJob);
+}
+
+bool jobs::updateFirmware(const Firmware& newer, const std::string& old) {
+  if (running) {
+    return false;
+  }
+  target = newer;
+  oldFile = old;
+  return start(FW_UPDATE, fwUpdateJob);
 }
 
 bool jobs::install(const Firmware& f) {

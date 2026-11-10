@@ -619,7 +619,7 @@ static void watch(lv_timer_t*) {
       hubNew = true;
       catalog::hubUpdated = jobs::hubUpdated;
       catalog::scanSd();
-    } else if (jobs::kind == jobs::DOWNLOAD || jobs::kind == jobs::INSTALL) {
+    } else if (jobs::kind == jobs::DOWNLOAD || jobs::kind == jobs::INSTALL || jobs::kind == jobs::FW_UPDATE) {
       catalog::scanSd();
     }
     if (jobDone) {

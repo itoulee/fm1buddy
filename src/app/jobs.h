@@ -34,6 +34,7 @@ enum Kind { NONE,
             SLOOP_SAMPLES,  // SLOOP: .wav files into a sample slot
             IDENTIFY,       // the FM-1's chip, through its boot loader, and back (uboot::lastChip)
             CHECK_UPDATE,   // fm1buddy's newest release, from the installer page (updateTag)
+            FW_UPDATE,      // a firmware on the SD card replaced by its newer one from the Hub
             UPDATE };       // fm1buddy's newest release onto this board (then it restarts)
 enum Step { IDLE,
             JOINING,
@@ -111,6 +112,8 @@ bool download(const Firmware& f);
 bool scan();
 bool join(const char* ssid, const char* pass);
 bool install(const Firmware& f);
+// newer, from the Hub, into /fm1 in place of the file old (a .part until it's checked: old stays if it fails)
+bool updateFirmware(const Firmware& newer, const std::string& old);
 bool probe(int d);
 bool send(int d, const std::string& file);  // in /syx
 bool voice(int d);

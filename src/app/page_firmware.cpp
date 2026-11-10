@@ -38,6 +38,20 @@ static lv_obj_t *list, *status, *refresh, *spin;
 static lv_obj_t *actions, *progress, *progressText;
 static std::string shownFm1;  // the FM-1 the Install button was made for
 static std::string listFm1;   // ... and the one the list was made for
+// where each list (the SD card's, the Hub's) was scrolled to, to come back to it; fresh: a new list (another
+// machine): from the top
+static int32_t scrollAt[2];
+static Source listSource;
+static bool fresh;
+// checking the Hub for a newer one of the SD card firmware shown (updFor): what it found
+enum Upd { UPD_ASK,
+           UPD_CHECKING,
+           UPD_NEWER,
+           UPD_NEWEST,
+           UPD_NONE };
+static std::string updFor;
+static Upd upd;
+static Firmware updTo;
 
 static void detailPage(lv_obj_t* page);
 
@@ -309,6 +323,26 @@ void ui::firmwareListAgain() {
   place();
 }
 
+// back where the list was, unless it's shorter now: then from the top
+static void restoreScroll() {
+  int32_t y = fresh ? 0 : scrollAt[source];
+  fresh = false;
+  lv_obj_update_layout(list);
+  if (y <= 0 || y > (int32_t)rows.size() * ROW_H - lv_obj_get_content_height(list)) {
+    scrollAt[source] = 0;
+    return;
+  }
+  lv_obj_scroll_to_y(list, y, LV_ANIM_OFF);
+  place();
+}
+
+// (another kind, order or machine: another list)
+static void fromTop() {
+  scrollAt[source] = 0;
+  lv_obj_scroll_to_y(list, 0, LV_ANIM_OFF);
+  place();
+}
+
 static void showStatus() {
   if (!status) {
     return;
@@ -367,16 +401,19 @@ static void pickKind(lv_event_t* e) {
   lv_dropdown_get_selected_str(dd, s, sizeof s);
   kindFilter = lv_dropdown_get_selected(dd) ? s : "";
   fillList();
+  fromTop();
 }
 
 static void pickMachine(lv_event_t* e) {
   int i = lv_dropdown_get_selected((lv_obj_t*)lv_event_get_target(e));
   if (source == HUB) {
     hubMachine = i;
+    fresh = true;
     go(firmwarePage);  // (its kinds and count are the machine's)
   } else {
     sdMachine = i - 1;  // ("All" first)
     fillList();
+    fromTop();
   }
 }
 
@@ -406,6 +443,7 @@ static lv_obj_t* machineMenu(lv_obj_t* row) {
 static void pickSort(lv_event_t* e) {
   sortBy = lv_dropdown_get_selected((lv_obj_t*)lv_event_get_target(e));
   fillList();
+  fromTop();
 }
 
 void ui::firmwareSource(bool hub) {
@@ -485,7 +523,13 @@ void ui::firmwarePage(lv_obj_t* page) {
   lv_obj_set_layout(list, LV_LAYOUT_NONE);  // (the rows are where they're scrolled to: place)
   lv_obj_add_event_cb(list, [](lv_event_t*) { place(); }, LV_EVENT_SCROLL, 0);
   lv_obj_add_event_cb(
-      list, [](lv_event_t*) { nSlots = 0, srcButton[0] = srcButton[1] = 0; }, LV_EVENT_DELETE, 0);  // (the page went)
+      list,
+      [](lv_event_t* e) {  // (the page went: where its list was, for next time)
+        scrollAt[listSource] = lv_obj_get_scroll_y((lv_obj_t*)lv_event_get_target(e));
+        nSlots = 0, srcButton[0] = srcButton[1] = 0;
+      },
+      LV_EVENT_DELETE, 0);
+  listSource = source;
   status = line(page, "", &lv_font_montserrat_12, t.dim);
   lv_obj_set_width(status, LV_PCT(100));
   showCounts();
@@ -497,6 +541,7 @@ void ui::firmwarePage(lv_obj_t* page) {
     jobs::hubList(false);
   }
   fillList();
+  restoreScroll();
   showStatus();
   tick = showStatus;
   jobDone = hubDone;
@@ -504,7 +549,8 @@ void ui::firmwarePage(lv_obj_t* page) {
 
 // ------------------------------------------------------------------------------------------ the details ---
 static void showProgress() {
-  bool busy = jobs::running && (jobs::kind == jobs::DOWNLOAD || jobs::kind == jobs::INSTALL);
+  int k = jobs::kind;
+  bool busy = jobs::running && (k == jobs::DOWNLOAD || k == jobs::INSTALL || k == jobs::HUB || k == jobs::FW_UPDATE);
   if (!busy && fm1Now() != shownFm1) {
     go(detailPage);  // an FM-1 came or went: the Install button changes
     return;
@@ -518,8 +564,66 @@ static void showProgress() {
   }
 }
 
+// the SD card firmware called file: its index, or -1
+static int sdIndex(const std::string& file) {
+  for (size_t i = 0; i < catalog::sd.size(); i++) {
+    if (file == catalog::sd.str(catalog::sd[i].file)) {
+      return (int)i;
+    }
+  }
+  return -1;
+}
+
+// the Hub's list came: is there a newer one of sel?
+static void updChecked() {
+  if (!jobs::ok) {
+    upd = UPD_ASK;
+    toast(devText(jobs::error).c_str(), true);
+    return;
+  }
+  int i = sdIndex(sel.file), h = i < 0 ? -1 : catalog::hubVersionOf(catalog::hub, catalog::sd, i);
+  if (h < 0) {
+    upd = UPD_NONE;
+    toast("It isn't in the Hub's list.");
+    return;
+  }
+  const FwItem &s = catalog::sd[i], &x = catalog::hub[h];
+  bool same = *catalog::sd.str(s.sha256) ? !strcasecmp(catalog::sd.str(s.sha256), catalog::hub.str(x.sha256))
+                                         : s.flags & FwItem::FROM_HUB && s.line == x.line;
+  if (same) {
+    upd = UPD_NEWEST;
+    toast("It's the newest one.");
+    return;
+  }
+  upd = UPD_NEWER;
+  updTo = catalog::details(catalog::hub, h);
+}
+
 static void downloaded() {
-  if (jobs::kind != jobs::DOWNLOAD && jobs::kind != jobs::INSTALL) {
+  int k = jobs::kind;
+  if (k == jobs::HUB && upd == UPD_CHECKING) {
+    updChecked();
+    go(detailPage);
+    return;
+  }
+  if (k == jobs::FW_UPDATE) {
+    int i = jobs::ok ? sdIndex(updTo.file) : -1;
+    if (i >= 0) {
+      sel = catalog::details(catalog::sd, i);
+      updFor = sel.file;
+      upd = UPD_NEWEST;
+      toast(("Updated" + (sel.version.empty() ? std::string(".") : " to v" + sel.version + ".")).c_str());
+    } else {
+      toast(devText(jobs::ok ? "Updated." : jobs::error).c_str(), !jobs::ok);
+      if (jobs::ok) {
+        go(firmwarePage);
+        return;
+      }
+    }
+    go(detailPage);
+    return;
+  }
+  if (k != jobs::DOWNLOAD && k != jobs::INSTALL) {
     return;
   }
   if (jobs::ok) {
@@ -534,6 +638,18 @@ static void downloaded() {
 static void save(lv_event_t*) {
   if (!jobs::download(sel)) {
     toast("Busy: try again in a moment.", true);
+  }
+  showProgress();
+}
+
+static void update(lv_event_t*) {
+  bool started = upd == UPD_NEWER ? jobs::updateFirmware(updTo, sel.file) : jobs::hubList();
+  if (!started) {
+    toast("Busy: try again in a moment.", true);
+    return;
+  }
+  if (upd != UPD_NEWER) {
+    upd = UPD_CHECKING;
   }
   showProgress();
 }
@@ -625,7 +741,10 @@ static void detailPage(lv_obj_t* page) {
     lv_label_set_long_mode(w, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(w, LV_PCT(100));
   } else if (!sel.hub && !sel.stock && source == SD) {
-    label(body, "Not in the Hub's list.", &lv_font_montserrat_14, t.dim);
+    bool older = updFor == sel.file && upd == UPD_NEWER;
+    std::string v = updTo.version.empty() ? "a newer one" : "v" + updTo.version;
+    label(body, older ? ("An older one: the Hub has " + v + ".").c_str() : "Not in the Hub's list.", &lv_font_montserrat_14,
+          older ? t.knob[1] : t.dim);
   }
   if (sel.keyboard || sel.mouse) {
     std::string h = std::string(LV_SYMBOL_USB "  Uses a USB ") + (sel.keyboard && sel.mouse ? "keyboard and mouse" : sel.keyboard ? "keyboard"
@@ -646,6 +765,22 @@ static void detailPage(lv_obj_t* page) {
   if (source == SD) {
     lv_obj_t* b = button(actions, LV_SYMBOL_TRASH "  Delete", erase);
     lv_obj_set_flex_grow(b, 1);
+    // a newer one from the Hub, in its place (a package, with Wi-Fi to get it)
+    if (updFor != sel.file) {
+      updFor = sel.file;
+      upd = UPD_ASK;
+    }
+    if (!sel.product.empty() && settings.ssid[0]) {
+      std::string text = upd == UPD_NEWER    ? LV_SYMBOL_DOWNLOAD "  Get " + (updTo.version.empty() ? std::string("newer") : "v" + updTo.version)
+                         : upd == UPD_NEWEST ? std::string("Newest")
+                         : upd == UPD_NONE   ? std::string("Not in Hub")
+                                             : LV_SYMBOL_REFRESH "  Update?";
+      lv_obj_t* u = button(actions, text.c_str(), update);
+      lv_obj_set_flex_grow(u, 1);
+      if (upd == UPD_NEWEST || upd == UPD_NONE) {
+        lv_obj_add_state(u, LV_STATE_DISABLED);
+      }
+    }
   }
   // installing: on the FM-1 that answered, if the package is for its model
   shownFm1 = fm1Now();
