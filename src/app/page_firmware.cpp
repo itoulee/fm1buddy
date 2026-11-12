@@ -361,7 +361,7 @@ static void fillSlot(Slot& s, int at) {
 
 // the slots, for where the list is scrolled to
 static void place() {
-  if (!nSlots) {
+  if (!nSlots || !list) {
     return;
   }
   int first = lv_obj_get_scroll_y(list) / ROW_H - 1;
@@ -397,9 +397,14 @@ static void showCounts() {
 static void fillList() {
   const Theme& t = theme();
   listChanges = FwList::changes;
-  lv_obj_clean(list);
+  // no slots before the list is cleaned: lv_obj_clean scrolls it back to the top, and that LV_EVENT_SCROLL calls
+  // place(), which filled slots whose labels were deleted a moment before (a Load access fault in lv_obj_get_screen,
+  // from lv_label_set_text in fillSlot: the Tab5's "blue screen" crash, whenever the list was made again while
+  // scrolled down: a search, the Hub's list arriving, another machine or kind)
   nSlots = 0;
+  rows.clear();
   spacer = 0;
+  lv_obj_clean(list);
   rows = shown();
   if (rows.empty()) {
     lv_obj_t* l = label(list, "", &lv_font_montserrat_14, t.dim);

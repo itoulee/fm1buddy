@@ -74,7 +74,21 @@ static RTC_NOINIT_ATTR struct {
   uint32_t bt[24];
 } crash;
 
+#ifdef BOARD_TAB5
+#include <hal/wdt_hal.h>
+#include <soc/rtc.h>
+#endif
+
 static void onPanic(arduino_panic_info_t* info, void*) {
+#ifdef BOARD_TAB5
+  // a backstop: the RTC watchdog resets the whole chip in 15 s if the panic handler never gets to its restart (a
+  // crash once left the Tab5 on a frozen screen until the USB-C port was opened)
+  wdt_hal_context_t rwdt = RWDT_HAL_CONTEXT_DEFAULT();
+  wdt_hal_write_protect_disable(&rwdt);
+  wdt_hal_config_stage(&rwdt, WDT_STAGE0, 15 * rtc_clk_slow_freq_get_hz(), WDT_STAGE_ACTION_RESET_SYSTEM);
+  wdt_hal_enable(&rwdt);
+  wdt_hal_write_protect_enable(&rwdt);
+#endif
   crash.core = info->core;
   strlcpy(crash.reason, info->reason ? info->reason : "?", sizeof crash.reason);
   crash.pc = (uint32_t)info->pc;
