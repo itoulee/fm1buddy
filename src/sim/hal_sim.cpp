@@ -18,6 +18,7 @@
 
 #include "fake.h"
 #include "hal.h"
+#include "settings.h"
 
 static bool wifi;
 
@@ -273,6 +274,16 @@ int hal::get(const char* url, const char* path, std::string* etag, void (*progre
   curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, onProgress);
   curl_easy_setopt(c, CURLOPT_XFERINFODATA, &g);
   curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
+  if (proxyUsed()) {  // Settings > Proxy
+    curl_easy_setopt(c, CURLOPT_PROXY, proxy.host);
+    curl_easy_setopt(c, CURLOPT_PROXYPORT, (long)proxy.port);
+    curl_easy_setopt(c, CURLOPT_PROXYTYPE, proxy.kind == PROXY_SOCKS5 ? CURLPROXY_SOCKS5_HOSTNAME : CURLPROXY_HTTP);
+    curl_easy_setopt(c, CURLOPT_HTTPPROXYTUNNEL, 1L);
+    if (proxy.user[0]) {
+      curl_easy_setopt(c, CURLOPT_PROXYUSERNAME, proxy.user);
+      curl_easy_setopt(c, CURLOPT_PROXYPASSWORD, proxy.pass);
+    }
+  }
   struct curl_slist* hs = 0;
   if (etag && !etag->empty()) {
     hs = curl_slist_append(hs, ("If-None-Match: " + *etag).c_str());

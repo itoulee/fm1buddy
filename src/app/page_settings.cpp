@@ -1,5 +1,8 @@
 // Settings: fm1buddy itself (Wi-Fi, the theme, the brightness, the Hub's list, the USB-C port). What it does to the
 // FM-1 (backing it up, recovering it) is on the Sounds tab
+#ifdef BOARD_TAB5
+#include "tab5.h"  // (src/tab5: the screen turned)
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,6 +29,7 @@ static void computerPage(lv_obj_t* page);
 static void aboutPage(lv_obj_t* page);
 static void passwordPage(lv_obj_t* page);
 static void touchCalPage(lv_obj_t* page);
+static void proxyPage(lv_obj_t* page);
 
 static void goTo(lv_event_t* e) {
   go((Builder)lv_event_get_user_data(e));
@@ -173,11 +177,18 @@ void ui::settingsPage(lv_obj_t* page) {
   header(page, "Settings");
   lv_obj_t* body = scroller(page);
   menuRow(body, LV_SYMBOL_WIFI "  Wi-Fi", settings.ssid[0] ? settings.ssid : "not set", wifiPage);
+  std::string px = !proxy.on ? std::string("off")
+                   : !proxyUsed() ? std::string("no host")
+                                  : std::string(proxy.kind == PROXY_SOCKS5 ? "SOCKS5 " : "HTTP ") + proxy.host + ":" +
+                                        std::to_string(proxy.port);
+  menuRow(body, LV_SYMBOL_SHUFFLE "  Proxy", px.c_str(), proxyPage);
   menuRow(body, LV_SYMBOL_IMAGE "  Theme", t.name, themePage);
   menuRow(body, LV_SYMBOL_HOME "  Start on", START_NAMES[startPage()], startOnPage);
   char sl[16];
   snprintf(sl, sizeof sl, sleepMinutes() ? "after %d min" : "never", sleepMinutes());
+#ifndef BOARD_TAB5  // (the Tab5 doesn't sleep: hal::sleep)
   menuRow(body, LV_SYMBOL_POWER "  Sleep", sl, sleepPage);
+#endif
   hal::TouchCal c;
   menuRow(body, LV_SYMBOL_EDIT "  Calibrate touch", hal::load("touchcal", &c, sizeof c) ? "done" : "", touchCalPage);
 
@@ -200,8 +211,21 @@ void ui::settingsPage(lv_obj_t* page) {
   }
   lv_obj_add_event_cb(sw, hubAuto, LV_EVENT_VALUE_CHANGED, 0);
 
+#ifdef BOARD_TAB5
+  // (no USB disk or USB MIDI for a computer on the Tab5: its USB-C port is the serial port alone). The screen the
+  // other way up, for the Tab5 held so
+  r = menuRow(body, LV_SYMBOL_LOOP "  Turn screen 180", 0, 0);
+  sw = lv_switch_create(r);
+  if (tab5::flipped()) {
+    lv_obj_add_state(sw, LV_STATE_CHECKED);
+  }
+  lv_obj_add_event_cb(
+      sw, [](lv_event_t* e) { tab5::flip(lv_obj_has_state((lv_obj_t*)lv_event_get_target(e), LV_STATE_CHECKED)); },
+      LV_EVENT_VALUE_CHANGED, 0);
+#else
   menuRow(body, LV_SYMBOL_USB "  USB disk", "SD card", diskStartPage);
   menuRow(body, LV_SYMBOL_USB "  On a computer", hal::computerMidi() ? "USB MIDI" : "Serial port", computerPage);
+#endif
   menuRow(body, LV_SYMBOL_SD_CARD "  About", FM1BUDDY_VERSION, aboutPage);
   updateRow(body);
 }
@@ -346,6 +370,176 @@ static void passwordPage(lv_obj_t* page) {
   lv_obj_add_event_cb(kb, keys, LV_EVENT_CANCEL, 0);
   tick = showJoin;
   jobDone = joined;
+}
+
+// ----------------------------------------------------------------------------------------------- proxy ---
+// a proxy for the Hub and downloads (settings.h: Proxy): on or off, HTTP or SOCKS5, where it is, and a user name and
+// password if it wants them. Each of those on a page of its own with the keyboard, as the Wi-Fi password is
+enum ProxyField { PF_HOST,
+                  PF_PORT,
+                  PF_USER,
+                  PF_PASS };
+static ProxyField pfEditing;
+static lv_obj_t* pfTa;
+static void proxyFieldPage(lv_obj_t* page);
+
+static void proxyOn(lv_event_t* e) {
+  proxy.on = lv_obj_has_state((lv_obj_t*)lv_event_get_target(e), LV_STATE_CHECKED);
+  proxySave();
+  if (proxy.on && !proxy.host[0]) {
+    toast("Put in the proxy's host too.");
+  }
+}
+
+static void proxyKind(lv_event_t*) {
+  proxy.kind = proxy.kind == PROXY_HTTP ? PROXY_SOCKS5 : PROXY_HTTP;
+  proxySave();
+  go(proxyPage);
+}
+
+static void proxyEdit(lv_event_t* e) {
+  pfEditing = (ProxyField)(intptr_t)lv_event_get_user_data(e);
+  go(proxyFieldPage);
+}
+
+// a row: the name, what it is now, and > (to its page)
+static void proxyRow(lv_obj_t* body, const char* name, const char* value, lv_event_cb_t cb, void* data) {
+  const Theme& t = theme();
+  lv_obj_t* r = listRow(body, cb, data);
+  label(r, name, &lv_font_montserrat_16, t.text);
+  lv_obj_t* v = line(r, value, &lv_font_montserrat_14, t.dim);
+  lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_set_flex_grow(v, 1);
+  label(r, LV_SYMBOL_RIGHT, &lv_font_montserrat_14, t.dim);
+}
+
+static void proxyPage(lv_obj_t* page) {
+  const Theme& t = theme();
+  header(page, "Proxy", settingsPage);
+  lv_obj_t* body = scroller(page);
+  lv_obj_t* r = listRow(body, 0, 0);
+  lv_obj_t* l = label(r, "Use a proxy", &lv_font_montserrat_16, t.text);
+  lv_obj_set_flex_grow(l, 1);
+  lv_obj_t* sw = lv_switch_create(r);
+  if (proxy.on) {
+    lv_obj_add_state(sw, LV_STATE_CHECKED);
+  }
+  lv_obj_add_event_cb(sw, proxyOn, LV_EVENT_VALUE_CHANGED, 0);
+  proxyRow(body, "Type", proxy.kind == PROXY_SOCKS5 ? "SOCKS5" : "HTTP (CONNECT)", proxyKind, 0);
+  proxyRow(body, "Host", proxy.host[0] ? proxy.host : "not set", proxyEdit, (void*)(intptr_t)PF_HOST);
+  proxyRow(body, "Port", std::to_string(proxy.port).c_str(), proxyEdit, (void*)(intptr_t)PF_PORT);
+  proxyRow(body, "User name", proxy.user[0] ? proxy.user : "none", proxyEdit, (void*)(intptr_t)PF_USER);
+  proxyRow(body, "Password", proxy.pass[0] ? "set" : "none", proxyEdit, (void*)(intptr_t)PF_PASS);
+  l = label(body,
+            "For the Hub's list, firmwares and fm1buddy's updates; joining Wi-Fi doesn't use it. Tap Type to change "
+            "it: HTTP is a proxy that takes CONNECT (Clash's mixed port, 7890, takes both). The host is the "
+            "computer's address on this Wi-Fi (as 192.168.1.x), not 127.0.0.1, and the proxy has to let in other "
+            "devices (Clash: Allow LAN). Sites' certificates are still checked.",
+            &lv_font_montserrat_12, t.dim);
+  lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(l, LV_PCT(100));
+  lv_obj_set_style_pad_top(l, 6, 0);
+}
+
+static void proxyKeys(lv_event_t* e) {
+  if (lv_event_get_code(e) == LV_EVENT_READY) {
+    const char* v = lv_textarea_get_text(pfTa);
+    switch (pfEditing) {
+      case PF_HOST: {
+        std::string h = v;  // (no scheme, no spaces: "http://1.2.3.4:7890/" is taken as 1.2.3.4 and 7890)
+        size_t s = h.find("://");
+        if (s != std::string::npos) {
+          h.erase(0, s + 3);
+        }
+        h.erase(std::remove(h.begin(), h.end(), ' '), h.end());
+        size_t slash = h.find('/');
+        if (slash != std::string::npos) {
+          h.erase(slash);
+        }
+        size_t colon = h.rfind(':');
+        if (colon != std::string::npos && h.find(':') == colon) {
+          int port = atoi(h.c_str() + colon + 1);
+          if (port > 0 && port < 65536) {
+            proxy.port = (uint16_t)port;
+          }
+          h.erase(colon);
+        }
+        strncpy(proxy.host, h.c_str(), sizeof proxy.host - 1);
+        proxy.host[sizeof proxy.host - 1] = 0;
+        break;
+      }
+      case PF_PORT: {
+        int port = atoi(v);
+        if (port <= 0 || port > 65535) {
+          toast("A port is 1 to 65535.", true);
+          return;
+        }
+        proxy.port = (uint16_t)port;
+        break;
+      }
+      case PF_USER:
+        strncpy(proxy.user, v, sizeof proxy.user - 1);
+        proxy.user[sizeof proxy.user - 1] = 0;
+        break;
+      case PF_PASS:
+        strncpy(proxy.pass, v, sizeof proxy.pass - 1);
+        proxy.pass[sizeof proxy.pass - 1] = 0;
+        break;
+    }
+    proxySave();
+    toast("Saved.");
+  }
+  go(proxyPage);
+}
+
+static void proxyReveal(lv_event_t* e) {
+  bool hide = !lv_textarea_get_password_mode(pfTa);
+  lv_textarea_set_password_mode(pfTa, hide);
+  lv_label_set_text(lv_obj_get_child((lv_obj_t*)lv_event_get_target(e), 0), hide ? LV_SYMBOL_EYE_OPEN : LV_SYMBOL_EYE_CLOSE);
+}
+
+static void proxyFieldPage(lv_obj_t* page) {
+  static const char* const TITLES[] = {"Proxy host", "Proxy port", "Proxy user name", "Proxy password"};
+  static const char* const HINTS[] = {"the computer's address, as 192.168.1.x", "7890", "none", "none"};
+  fullscreen(true);
+  header(page, TITLES[pfEditing], proxyPage);
+  lv_obj_t* r = box(page, LV_FLEX_FLOW_ROW);
+  lv_obj_set_style_pad_column(r, 4, 0);
+  pfTa = lv_textarea_create(r);
+  lv_textarea_set_one_line(pfTa, true);
+  lv_textarea_set_placeholder_text(pfTa, HINTS[pfEditing]);
+  lv_obj_set_flex_grow(pfTa, 1);
+  lv_obj_add_state(pfTa, LV_STATE_FOCUSED);
+  switch (pfEditing) {
+    case PF_HOST:
+      lv_textarea_set_max_length(pfTa, sizeof proxy.host - 1);
+      lv_textarea_set_text(pfTa, proxy.host);
+      break;
+    case PF_PORT:
+      lv_textarea_set_max_length(pfTa, 5);
+      lv_textarea_set_accepted_chars(pfTa, "0123456789");
+      lv_textarea_set_text(pfTa, std::to_string(proxy.port).c_str());
+      break;
+    case PF_USER:
+      lv_textarea_set_max_length(pfTa, sizeof proxy.user - 1);
+      lv_textarea_set_text(pfTa, proxy.user);
+      break;
+    case PF_PASS:
+      lv_textarea_set_max_length(pfTa, sizeof proxy.pass - 1);
+      lv_textarea_set_password_mode(pfTa, true);
+      lv_textarea_set_text(pfTa, proxy.pass);
+      lv_obj_set_size(button(r, LV_SYMBOL_EYE_OPEN, proxyReveal), 40, 36);
+      break;
+  }
+  lv_obj_t* kb = lv_keyboard_create(page);
+  lv_obj_set_size(kb, LV_PCT(100), LV_PCT(100));
+  lv_obj_set_flex_grow(kb, 1);
+  lv_keyboard_set_textarea(kb, pfTa);
+  if (pfEditing == PF_PORT) {
+    lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_NUMBER);
+  }
+  lv_obj_add_event_cb(kb, proxyKeys, LV_EVENT_READY, 0);
+  lv_obj_add_event_cb(kb, proxyKeys, LV_EVENT_CANCEL, 0);
 }
 
 // ----------------------------------------------------------------------------------------------- touch ---
