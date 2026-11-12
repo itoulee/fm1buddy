@@ -4,10 +4,25 @@
 // endpoint, all the time)
 #pragma once
 
+#ifdef BOARD_TAB5
+// the P4 (the framework's config doesn't say, and its default is the S2): its USB-OTG FS is port 0, HS port 1
+#ifndef CFG_TUSB_MCU
+#define CFG_TUSB_MCU OPT_MCU_ESP32P4
+#endif
+#endif
+
 #include "tusb_config.h"  // the framework's (arduino_tinyusb/include)
 
 #undef BOARD_TUH_RHPORT
+#ifdef BOARD_TAB5
+#define BOARD_TUH_RHPORT 1  // the Tab5's USB-A port: the P4's USB-OTG HS (TinyUSB's port 1)
+// the host's DMA goes through the P4's data cache: each buffer it reads or writes on a cache line of its own (64
+// bytes), and whole lines (TinyUSB writes them back and drops them around a transfer)
+#define USB_DMA_ALIGN 64
+#else
 #define BOARD_TUH_RHPORT 0  // the S3 has one USB controller
+#define USB_DMA_ALIGN 4
+#endif
 #define CFG_TUH_MAX_SPEED OPT_MODE_FULL_SPEED
 
 #undef CFG_TUH_ENUMERATION_BUFSIZE

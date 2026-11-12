@@ -39,9 +39,9 @@ static std::atomic<uint16_t> peaks[2];
 // two, in turn: the next packet comes into one (internal RAM: the host's DMA writes it) while the last is read from the
 // other. With one, a late read would have the next packet land on it half way. Each starts on a 4-byte boundary
 // (the DMA writes words: the second one at 1023 got every other packet 3 bytes early)
-static uint8_t pkt[2][(PKT_MAX + 3) & ~3] __attribute__((aligned(4)));
+static uint8_t pkt[2][(PKT_MAX + USB_DMA_ALIGN - 1) & ~(USB_DMA_ALIGN - 1)] __attribute__((aligned(USB_DMA_ALIGN)));
 static uint8_t filling;  // the one the transfer under way fills
-static uint8_t rateBuf[4] __attribute__((aligned(4)));
+static uint8_t rateBuf[USB_DMA_ALIGN] __attribute__((aligned(USB_DMA_ALIGN)));
 static tusb_control_request_t rateReq;  // (kept: TinyUSB reads it as the request goes)
 static uint32_t lostAtStop;
 

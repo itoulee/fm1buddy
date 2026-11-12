@@ -11,6 +11,14 @@
 #include <esp_private/usb_phy.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#ifdef BOARD_TAB5
+#include <esp_rom_sys.h>
+
+#include "tab5.h"
+#define STAGE(s) tab5::stage(s)
+#else
+#define STAGE(s)
+#endif
 
 #include <atomic>
 #include <string>
@@ -27,13 +35,13 @@ static uint32_t ledOffAt;
 static struct {
   bool on;                      // midi.h knows it
   uint8_t daddr;                // its USB address
-  alignas(4) uint16_t str[32];  // its product string, as it comes (UTF-16LE, after a 2-byte header)
+  alignas(USB_DMA_ALIGN) uint16_t str[32];  // its product string, as it comes (UTF-16LE, after a 2-byte header)
   uint8_t outEp;                // its MIDI OUT endpoint (usbOut), and its packet size
   uint16_t outMps;
   tusb_desc_endpoint_t outDesc;  // (to open it again: a send that stuck)
   uint32_t reopenAt;             // a stuck send was dropped: its endpoint opens again then (0: it's open)
   volatile bool outBusy;
-  alignas(4) uint8_t outBuf[64];
+  alignas(USB_DMA_ALIGN) uint8_t outBuf[64];
 } dev[MIDI_USB];
 
 static void blink() {
@@ -85,7 +93,11 @@ static void xferDone(tuh_xfer_t* x) {
 // the USB controller as it is, for the log: its port (connected, enabled), and its 8 channels: in use (TinyUSB's,
 // HAINTMSK: set when one starts, cleared when it's freed) and enabled (HCCHAR). A channel in use with nothing going on
 // for good is one TinyUSB lost
+#ifdef BOARD_TAB5
+#define DWC2_BASE 0x50000000u  // the P4's USB-OTG HS (TinyUSB's port 1, dwc2_esp32.h): the USB-A port
+#else
 #define DWC2_BASE 0x60080000u
+#endif
 static void usbDiag(const char* why) {
   uint32_t hprt = REG_READ(DWC2_BASE + 0x440), mask = REG_READ(DWC2_BASE + 0x418), on = 0;
   for (int c = 0; c < 8; c++) {
@@ -135,7 +147,7 @@ static bool xferSync(uint8_t ep, void* buf, uint16_t len, uint32_t* got, uint32_
 
 // its endpoints, from its configuration. Asked for without waiting: TinyUSB refuses a control transfer that waits from
 // its own task (this one)
-alignas(4) static uint8_t storDesc[256];
+alignas(USB_DMA_ALIGN) static uint8_t storDesc[256];
 
 static void storageGotConfig(tuh_xfer_t* x) {
   const uint8_t* desc = storDesc;
@@ -236,7 +248,7 @@ static bool storageRun() {
 
 static bool storageTry() {
   // (DMA: aligned, and whole words: csw is 13 bytes, its buffer more)
-  alignas(4) static uint8_t cbw[32], csw[64], data[STORAGE_IO_MAX];
+  alignas(USB_DMA_ALIGN) static uint8_t cbw[64], csw[64], data[STORAGE_IO_MAX];
   if (!stor.daddr || !stor.in || !stor.out || cmd.len > sizeof data) {
     return false;
   }
@@ -354,18 +366,143 @@ static void gotName(tuh_xfer_t* x) {
   }
 }
 
+static const char* speedName(unsigned s) {
+  return s == TUSB_SPEED_HIGH ? "high" : s == TUSB_SPEED_FULL ? "full" : s == TUSB_SPEED_LOW ? "low" : "?";
+}
+
+// the root port as the controller sees it (HPRT), for the log: VBUS, something plugged in, and at what speed. Polled by
+// the host task, logged when it changes, so a device that never enumerates still shows up (or doesn't) in the log
+static uint32_t connectedAt;  // millis() the root port saw a device (0: nothing there)
+static uint32_t enumAt;       // millis() its device descriptor came (0: not yet)
+static uint8_t kicks;         // host restarts for a device that sat there without enumerating
+static bool wantKick;         // portWatch asks the host task for one (restart, below)
+static uint32_t kickAt;       // when the last one was (the port drops its device then: not an unplug)
+
+static void portWatch() {
+  static uint32_t last = 0xFFFFFFFF;
+  uint32_t hprt = REG_READ(DWC2_BASE + 0x440);
+  // a device plugged in that never got as far as its device descriptor: TinyUSB gave up on it (a reset or the first
+  // descriptor read failed, it's only retried on a new attach). Log it, and restart the host (twice at most), which
+  // resets the port and enumerates it again
+  if (connectedAt && !enumAt && (hprt & 1u) && millis() - connectedAt > 4000 && kicks < 2) {
+    hal::log("usb: port: a device has been connected %u ms and hasn't enumerated (HPRT %08X): restarting the host",
+             (unsigned)(millis() - connectedAt), (unsigned)hprt);
+    kicks++;
+    connectedAt = millis() | 1;
+    kickAt = millis() | 1;
+    wantKick = true;
+  }
+  // bit 0 connected, bit 2 enabled, bit 12 power (VBUS asked for), bits 17-18 speed (0 high, 1 full, 2 low)
+  uint32_t now = hprt & ((1u << 0) | (1u << 2) | (1u << 12) | (3u << 17));
+  if (now == last) {
+    return;
+  }
+  if (last == 0xFFFFFFFF || ((now ^ last) & (1u << 12))) {
+    hal::log("usb: port: VBUS %s", now & (1u << 12) ? "on" : "off");
+  }
+  if (last == 0xFFFFFFFF || ((now ^ last) & 1u)) {
+    if (now & 1u) {
+      hal::log("usb: port: device connected");
+      if (!connectedAt) {
+        connectedAt = millis() | 1, enumAt = 0;
+      }
+    } else {
+      bool ours = kickAt && millis() - kickAt < 2000;  // (the restart we asked for, not an unplug)
+      hal::log("usb: port: nothing connected%s", ours                    ? " (host restarting)"
+                                                 : connectedAt && !enumAt ? " (it went before it enumerated)"
+                                                                          : "");
+      if (!ours) {
+        connectedAt = enumAt = 0;
+        kicks = 0;
+      }
+    }
+  }
+  if ((now & (1u << 2)) && (last == 0xFFFFFFFF || !(last & (1u << 2)) || ((now ^ last) & (3u << 17)))) {
+    unsigned sp = now >> 17 & 3;
+    hal::log("usb: port: enabled, %s speed", sp == 0 ? "high" : sp == 1 ? "full" : sp == 2 ? "low" : "?");
+  }
+  last = now;
+}
+
+// TinyUSB's events from the controller's interrupt (tuh_event_hook_cb, in the ISR): attach, remove, transfer done,
+// other. None at all with a device plugged in: the interrupt never reaches TinyUSB
+static std::atomic<uint32_t> irqEv[4];
+
+// the controller's state, raw, for the log: port (HPRT), interrupts pending (GINTSTS) and asked for (GINTMSK), their
+// global enable (GAHBCFG bit 0), and TinyUSB's events so far
+static void usbRegs(const char* why) {
+  hal::log("usb: %s: HPRT %08X GINTSTS %08X GINTMSK %08X GAHBCFG %08X, events: attach %u remove %u xfer %u other %u",
+           why, (unsigned)REG_READ(DWC2_BASE + 0x440), (unsigned)REG_READ(DWC2_BASE + 0x014),
+           (unsigned)REG_READ(DWC2_BASE + 0x018), (unsigned)REG_READ(DWC2_BASE + 0x008), (unsigned)irqEv[0].load(),
+           (unsigned)irqEv[1].load(), (unsigned)irqEv[2].load(), (unsigned)irqEv[3].load());
+}
+
+static uint8_t rxShown[MIDI_USB], txShown[MIDI_USB];  // the first few MIDI reads / sends of each mount, for the log
+
+static struct {
+  uint16_t vid, pid;
+} seen[CFG_TUH_DEVICE_MAX + CFG_TUH_HUB + 1];  // by USB address: what went, for the log
+
 extern "C" {
+void tuh_event_hook_cb(uint8_t, uint32_t id, bool) {
+  irqEv[id < 3 ? id : 3]++;  // (HCD_EVENT_DEVICE_ATTACH 0, _REMOVE 1, _XFER_COMPLETE 2)
+}
+
+// enumeration: its device descriptor (before it's configured)
+void tuh_enum_descriptor_device_cb(uint8_t daddr, const tusb_desc_device_t* d) {
+  tuh_bus_info_t b = {};
+  tuh_bus_info_get(daddr, &b);
+  if (!b.hub_addr && connectedAt && !enumAt) {
+    enumAt = millis() | 1;
+    kicks = 0;
+  }
+  hal::log("usb: enumerating %u: %04X:%04X, USB %x.%02x, class %02X, %s speed%s (%u ms after connect)", daddr,
+           d->idVendor, d->idProduct, d->bcdUSB >> 8, d->bcdUSB & 0xFF, d->bDeviceClass, speedName(b.speed),
+           b.hub_addr ? ", on a hub" : "", connectedAt ? (unsigned)(millis() - connectedAt) : 0u);
+  if (daddr < sizeof seen / sizeof *seen) {
+    seen[daddr].vid = d->idVendor, seen[daddr].pid = d->idProduct;
+  }
+}
+
+// enumeration: its configuration, each interface's class (01 audio, 01/03 MIDI, 08 storage, 09 hub)
+bool tuh_enum_descriptor_configuration_cb(uint8_t daddr, uint8_t cfg_index, const tusb_desc_configuration_t* c) {
+  char s[96];
+  int k = 0;
+  const uint8_t* p = (const uint8_t*)c;
+  const uint8_t* end = p + tu_min16(tu_le16toh(c->wTotalLength), CFG_TUH_ENUMERATION_BUFSIZE);
+  for (; p + 1 < end && p[0] >= 2 && p + p[0] <= end && k < (int)sizeof s - 12; p += p[0]) {
+    if (p[1] == TUSB_DESC_INTERFACE && p[0] >= 9 && p[3] == 0) {  // (alternate setting 0 only)
+      k += snprintf(s + k, sizeof s - k, " %u:%02X/%02X", p[2], p[5], p[6]);
+    }
+  }
+  s[k] = 0;
+  hal::log("usb: enumerating %u: configuration %u, interfaces (number:class/subclass)%s", daddr, cfg_index,
+           k ? s : " none");
+  return true;
+}
+
 void tuh_mount_cb(uint8_t daddr) {
   uint16_t vid = 0, pid = 0;
   tuh_vid_pid_get(daddr, &vid, &pid);
-  hal::log("usb: device %u: %04X:%04X", daddr, vid, pid);
+  tuh_bus_info_t b = {};
+  tuh_bus_info_get(daddr, &b);
+  hal::log("usb: device %u: %04X:%04X mounted (%s speed%s)", daddr, vid, pid, speedName(b.speed),
+           b.hub_addr ? ", on a hub" : "");
+  if (daddr < sizeof seen / sizeof *seen) {
+    seen[daddr].vid = vid, seen[daddr].pid = pid;
+  }
   if (vid == 0x4C4A && pid == 0x8057) {  // the FM-1's boot loader (the only storage device asked for)
     stor.daddr = daddr, stor.vid = vid, stor.pid = pid, stor.in = stor.out = 0, stor.pending = true;
   }
 }
 
 void tuh_umount_cb(uint8_t daddr) {
-  hal::log("usb: device %u went", daddr);
+  if (daddr < sizeof seen / sizeof *seen) {
+    hal::log("usb: device %u went (%04X:%04X)", daddr, seen[daddr].vid, seen[daddr].pid);
+    seen[daddr] = {};
+  } else {
+    hal::log("usb: device %u went", daddr);
+  }
   usbDiag("after it");
   if (daddr == stor.daddr) {
     stor.daddr = 0;
@@ -402,6 +539,7 @@ void tuh_midi_mount_cb(uint8_t idx, const tuh_midi_mount_cb_t* m) {
 
 void tuh_midi_umount_cb(uint8_t idx) {
   if (idx < MIDI_USB) {
+    rxShown[idx] = txShown[idx] = 0;
     dev[idx].outBusy = false;
   }
   if (idx < MIDI_USB && dev[idx].on) {
@@ -416,6 +554,11 @@ void tuh_midi_rx_cb(uint8_t idx, uint32_t) {
   }
   uint8_t buf[64];
   for (uint32_t n; (n = tuh_midi_packet_read_n(idx, buf, sizeof buf));) {
+    if (rxShown[idx] < 4) {
+      rxShown[idx]++;
+      hal::log("usb: midi %u: in %u bytes: %02X %02X %02X %02X %02X %02X %02X %02X", idx, (unsigned)n, buf[0], buf[1],
+               buf[2], buf[3], n > 4 ? buf[4] : 0, n > 5 ? buf[5] : 0, n > 6 ? buf[6] : 0, n > 7 ? buf[7] : 0);
+    }
     for (uint32_t k = 0; k + 4 <= n; k += 4) {
       if (buf[k] & 0x0F) {  // CIN 0: nothing (padding)
         midi::in(idx, buf + k);
@@ -438,6 +581,10 @@ static void outDone(tuh_xfer_t* x) {
   dev[d].outBusy = false;
   if (x->result == XFER_RESULT_SUCCESS) {
     sent[d] += x->actual_len;
+    if (txShown[d] < 4) {
+      txShown[d]++;
+      hal::log("usb: midi %u: out %u bytes sent", d, (unsigned)x->actual_len);
+    }
   } else {
     hal::log("usb: midi %u: a send failed (%d)", d, (int)x->result);
   }
@@ -547,27 +694,59 @@ void hal::usbRestart() {
 
 static void hostTask(void*) {
   // the USB controller's clock, and the PHY to it as a host (TinyUSB leaves both to ESP-IDF)
-  periph_module_reset(PERIPH_USB_MODULE);
-  periph_module_enable(PERIPH_USB_MODULE);
   usb_phy_config_t pc = {};
   pc.controller = USB_PHY_CTRL_OTG;
+#ifdef BOARD_TAB5
+  // the P4's USB-OTG HS controller, on its UTMI PHY (the USB-A port): usb_new_phy starts its clock itself
+  pc.target = USB_PHY_TARGET_UTMI;
+#else
+  periph_module_reset(PERIPH_USB_MODULE);
+  periph_module_enable(PERIPH_USB_MODULE);
   pc.target = USB_PHY_TARGET_INT;
+#endif
   pc.otg_mode = USB_OTG_MODE_HOST;
   pc.otg_speed = USB_PHY_SPEED_UNDEFINED;
   usb_phy_handle_t phy;
+  STAGE("usb host: phy");
   esp_err_t e = usb_new_phy(&pc, &phy);
   if (e != ESP_OK) {
     hal::log("usb: no PHY (%s)", esp_err_to_name(e));
     vTaskDelete(0);
   }
+#ifdef BOARD_TAB5
+  // the HS controller's own PHY (UTMI), at full speed (CFG_TUH_MAX_SPEED: the root port FS/LS only, as on the S3, so
+  // the hub and the devices on it never need split transactions)
+  tuh_configure_dwc2_t dc = {};
+  dc.use_hs_phy = true;
+  tuh_configure(BOARD_TUH_RHPORT, TUH_CFGID_DWC2, &dc);
+#endif
   if (!tuh_init(BOARD_TUH_RHPORT)) {  // its interrupt lands on this core
     hal::log("usb: TinyUSB didn't start");
     vTaskDelete(0);
   }
   hostOn = true;
-  hal::log("usb: host");
+  STAGE("usb host: done, TinyUSB up");
+  hal::log("usb: host up on port %d (DWC2 at %08X)", BOARD_TUH_RHPORT, (unsigned)DWC2_BASE);
+  usbRegs("at start");
+  uint32_t started = millis(), regsAt = started, lastEv = 0;
   for (;;) {
-    tuh_task_ext(1, false);
+    tuh_task_ext(1, false);  // (waits 1 ms at most for an event: the rest of the loop runs either way)
+    portWatch();
+    // the registers once a second for the first 10 s, then every 10 s while the event count moves or a device is
+    // there without having enumerated
+    uint32_t now = millis(), ev = irqEv[0] + irqEv[1] + irqEv[3];
+    if (now - regsAt >= 1000 && (now - started < 10500 || (now - regsAt >= 10000 && (ev != lastEv ||
+                                                                                       (connectedAt && !enumAt))))) {
+      regsAt = now;
+      lastEv = ev;
+      usbRegs("state");
+    }
+    if (wantKick) {
+      wantKick = false;
+      if (restart != 1) {
+        restart = 1;  // (just below: the same restart usbRestart asks for)
+      }
+    }
     if (stor.pending && stor.daddr) {
       storageOpen();
     }
