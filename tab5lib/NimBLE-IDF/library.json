@@ -1,0 +1,8 @@
+{
+  "name": "NimBLE-IDF",
+  "version": "2.5.1",
+  "description": "NimBLE-Arduino 2.5.1's C++ API (h2zero, Apache-2.0) on the framework's own NimBLE host (ESP-IDF's bt component): for the ESP32-P4, whose Bluetooth is an ESP32-C6's over ESP-Hosted (the framework's NimBLE talks to it), which NimBLE-Arduino's own bundled host and controller port can't do",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "build": { "srcDir": "src" }
+}
