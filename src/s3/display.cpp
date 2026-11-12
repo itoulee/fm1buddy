@@ -399,8 +399,8 @@ bool display::rotated() {
 }
 
 void display::toScreen(int px, int py, int& x, int& y) {
-  x = px;  // (the panel is the screen's way already)
-  y = py;
+  x = SCREEN_W - 1 - px;  // (the GT911 reads from the other corner: a half turn of the panel's way, issue #91)
+  y = SCREEN_H - 1 - py;
 }
 
 void display::fromScreen(int x, int y, int& px, int& py) {
