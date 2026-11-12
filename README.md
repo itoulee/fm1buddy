@@ -1,3 +1,86 @@
+# fm1buddy for the M5Stack Tab5 (ESP32-P4): this fork's `tab5` branch
+
+> An unofficial port of [konsumer/fm1buddy](https://github.com/konsumer/fm1buddy) (all credit for fm1buddy itself
+> goes there) to the [M5Stack Tab5](https://docs.m5stack.com/en/core/Tab5). Based on upstream `main` at `ef5512f`
+> (2026-11-11), with all of upstream's code. Upstream's own README follows below the line.
+
+## Hardware
+
+- M5Stack Tab5: ESP32-P4 **revision v1.3** (esptool says `revision v1.x`), **16 MB flash**, the ESP32-C6 for
+  Wi-Fi/Bluetooth (ESP-Hosted). Build env `tab5`. A `tab5-p4r3` env exists for P4 v3.x chips, but isn't tried.
+- **USB-A**: the USB host (the P4's USB-OTG HS port). The FM-1 goes here (a hub works too). Its 5 V is switched on at boot.
+- **USB-C**: power, and the serial console (USB-Serial/JTAG, 115200). It is never the host.
+- microSD (FAT32), the same as upstream (`/fm1`, `/fm1buddy/log.txt`, ...).
+- The app draws at 640x360, and each pixel goes to the 1280x720 panel as 2x2.
+
+## What this fork adds
+
+- **Search the firmware list by name**, on the Hub's list and the SD card's: a search box with an on-screen keyboard
+  and a clear button. It matches name, author, file name or product, and ignores case.
+- **FM1 Open / FM1 Community** (M-VAVE Open V14, USB `3654:7756`): recognised as an FM-1 (its identities
+  `FM1_OFFICIAL_OPEN`, `FM1_COMMUNITY_n`, `ota-FM1C_...`), and its updater is armed (cmd 0x31/0x32) before Install.
+- **Logging**: every log line goes to the USB-C console, through a log task of its own. It never waits for a computer
+  that isn't reading. It also goes to `/sdcard/fm1buddy/log.txt` in batches (the run before is in `log-1.txt`). Send
+  `log` on the console to print both. There are also detailed USB-A attach/enumeration logs, and the reset reason by
+  name at boot.
+- **Stall watch**: if the main loop stops for 8 s, `stall:` lines say where (its task state, core 1's PC samples). At 30 s
+  it restarts, and the next boot logs `crash: main loop stuck at ...`.
+- **Crash backstop**: the panic handler arms the RTC watchdog (15 s), so a crash always restarts. The crash is logged at
+  the next boot (`crash: ...`, decode with `riscv32-esp-elf-addr2line -pfiaC -e firmware.elf ADDR...`).
+- Settings > Proxy (HTTP CONNECT / SOCKS5) for the Hub and downloads.
+
+### The "blue screen" fix
+
+The Tab5 used to freeze on its (blue-themed) screen. The core dump showed a use-after-free. The firmware list was
+rebuilt (typing a search, the Hub's list arriving, another machine or kind) while it was scrolled down.
+`lv_obj_clean()` scrolls back to the top, and that scroll event filled list rows whose labels had just been deleted
+(a Load access fault in `lv_obj_get_screen`). Fixed in `531b776` (pushed here as `db75043`): the rows are
+dropped before the list is cleaned.
+
+## Build
+
+    pio run -e tab5        # PlatformIO; output in .pio/build/tab5/ (firmware.bin, firmware.factory.bin, firmware.elf)
+
+(`pio run -e sim-tab5` builds the desktop simulator at the Tab5's size.)
+
+## Flash
+
+**Back up first.** Put the Tab5 in download mode (hold the power button until the green light blinks), then:
+
+    esptool --chip esp32p4 -p PORT -b 1500000 read-flash 0 0x1000000 tab5-backup-full.bin
+
+To recover, write it back with `esptool --chip esp32p4 -p PORT -b 1500000 write-flash 0x0 tab5-backup-full.bin`
+(or use M5Stack's factory firmware, through M5Burner).
+
+**Update and keep the settings** (Wi-Fi, theme, proxy are in NVS at 0x9000, which this doesn't touch):
+
+    esptool --chip esp32p4 -p PORT -b 1500000 write-flash 0xe000 boot_app0.bin 0x10000 fm1buddy-tab5-p4v1-app-0x10000.bin
+
+(`boot_app0.bin` at 0xe000 makes it boot app0. The app is `.pio/build/tab5/firmware.bin`.)
+
+**Fresh install** (the merged image covers 0x0 up to the end of the app, and **erases the settings**, since NVS in it is
+blank):
+
+    esptool --chip esp32p4 -p PORT -b 1500000 write-flash 0x0 fm1buddy-tab5-p4v1-merged-0x0.bin
+
+The current p4v1 build (2026-11-13) is:
+
+- `fm1buddy-tab5-p4v1-app-0x10000.bin`: 2,323,680 bytes, sha256 `5eaf776dec42c8dfeea47f9b7fd66e4e8755f291709870797058e3dd93e08a7e`
+- `fm1buddy-tab5-p4v1-merged-0x0.bin`: 2,389,216 bytes, sha256 `c6766c00b9fc96137a3cf118015231709c3f8b166d9e9ce964728bc69cec2b1e`
+
+## Not on the Tab5, and not tried yet
+
+- Not on the Tab5: FM-1 Recover/Unbrick (it drives the S3's own USB pins), USB disk mode, USB MIDI for a computer,
+  and sleep.
+- Not tried on the real thing:
+  - **Install under FM1 Open** (its updater's arming: the tag is the `.fwsc`'s sha256, which Open may not take).
+  - **Touch and orientation**: the touch mapping across the whole panel, and the 180-degree flip setting.
+  - The RTC-watchdog crash backstop, and the stall watch's restart.
+  - The `tab5-p4r3` build (P4 v3.x).
+- More notes are in [docs/TAB5.md](docs/TAB5.md).
+
+---
+
 # fm1buddy
 
 [![video](https://img.youtube.com/vi/mT8rAArBcnE/hqdefault.jpg)](https://www.youtube.com/watch?v=mT8rAArBcnE)
