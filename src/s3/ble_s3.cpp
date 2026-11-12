@@ -14,6 +14,14 @@
 
 #include <atomic>
 
+#ifdef BOARD_TAB5
+#include <esp_rom_sys.h>
+
+#include "tab5.h"
+#define STAGE(s) tab5::stage(s)
+#else
+#define STAGE(s)
+#endif
 #include "board.h"
 #include "hal.h"
 #include "midi.h"
@@ -490,7 +498,14 @@ static void start() {
     k = {};
     k.peer = k.slot = -1;
   }
-  NimBLEDevice::init(BLE_NAME);
+  STAGE("ble (esp-hosted, the C6): start");
+  if (!NimBLEDevice::init(BLE_NAME)) {  // (the Tab5: the ESP32-C6 not answering, or its ESP-Hosted too old)
+    STAGE("ble (esp-hosted, the C6): FAILED, off (the app goes on)");
+    hal::log("ble: didn't start: off");
+    NimBLEDevice::deinit(true);
+    want = false;
+    return;
+  }
   NimBLEDevice::setSecurityAuth(true, false, true);  // bond if asked ("just works")
   server = NimBLEDevice::createServer();
   server->setCallbacks(&serverCB, false);
@@ -516,6 +531,7 @@ static void start() {
   sc->setWindow(50);
   up = true;
   dirty = true;
+  STAGE("ble (esp-hosted, the C6): done");
   hal::log("ble: on, %u KB internal RAM free", (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));
 }
 
@@ -632,6 +648,9 @@ static void connect() {
 
 void board::bleLoop() {
   bool run = want && !pauses;
+#ifdef BOARD_TAB5
+  run = run && millis() > 4000;  // (the ESP32-C6: once the app is up and drawn)
+#endif
   if (run && !up) {
     start();
   } else if (!run && up) {

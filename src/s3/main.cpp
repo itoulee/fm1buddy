@@ -16,6 +16,14 @@
 #include "record.h"
 #include "touch.h"
 #include "ui.h"
+#ifdef BOARD_TAB5
+#include <esp_rom_sys.h>
+
+#include "tab5.h"
+#define STAGE(s) tab5::stage(s)
+#else
+#define STAGE(s)
+#endif
 
 #define W SCREEN_W
 #define H SCREEN_H
@@ -183,6 +191,7 @@ static void readTouch(lv_indev_t*, lv_indev_data_t* data) {
 
 // deep sleep until a finger is on the panel: its INT goes low while one is (in polling mode, G_MODE 0). The panel
 // stays powered and out of reset (its RST held high), the backlight held off, the screen's controller asleep
+#ifndef BOARD_TAB5  // (the Tab5's: tab5.cpp)
 void hal::sleep() {
 #ifdef SCREEN_ST77922
   // the 3.5"'s touch interrupt is GPIO47, and only the chip's RTC pins (0-21) wake it from a deep sleep: it would sleep
@@ -211,6 +220,7 @@ void hal::sleep() {
   Serial.flush();
   esp_deep_sleep_start();
 }
+#endif
 
 static uint32_t tick() {
   return millis();
@@ -218,22 +228,33 @@ static uint32_t tick() {
 
 void setup() {
   Serial.begin(115200);
+  STAGE("setup: start");
   // the screen first, and the app's frame on it (ui::frame): then the rest
   hal::log("boot: screen at %u ms", (unsigned)millis());
+  STAGE("touch/M5.begin: start");
   touch::begin();
+  STAGE("touch/M5.begin: done");
+  STAGE("lvgl: start");
   lv_init();
   lv_tick_set_cb(tick);
   lv_log_register_print_cb([](lv_log_level_t, const char* s) { hal::log("%s", s); });
   hal::log("boot: lvgl at %u ms", (unsigned)millis());
+  STAGE("display (lvgl buffers): start");
   lv_display_t* disp = display::begin();  // the panel up (its light's off: ui::frame)
+  STAGE("display (lvgl buffers): done");
   lv_indev_t* in = lv_indev_create();
   lv_indev_set_type(in, LV_INDEV_TYPE_POINTER);
   lv_indev_set_read_cb(in, readTouch);
   xTaskCreatePinnedToCore(touchTask, "touch", 3072, 0, 4, 0, 0);
+  STAGE("touch task: made");
 
+  STAGE("ui frame: start");
   ui::frame();
+  STAGE("ui frame: done");
 
+  STAGE("board (nvs, sd, usb detect): start");
   board::begin();
+  STAGE("board: done");
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0) {
     hal::log("boot: woken by a touch");
   }
@@ -243,9 +264,11 @@ void setup() {
   if (hal::recoveryMode()) {
     board::usbBegin();
   }
+  STAGE("ui: start");
   ui::begin();  // (the USB port otherwise: board::loop, once it knows if a computer is on it)
   hal::log("fm1buddy: up in %u ms, %u KB internal RAM free, %u KB PSRAM free", (unsigned)millis(),
            (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024), (unsigned)(ESP.getFreePsram() / 1024));
+  STAGE("ui: done, setup over (bluetooth, if on, from 4 s: the loop)");
 }
 
 // the serial console (tools/s3.py): "shot" sends the screen (SHOT w h, then w*h RGB565 pixels, little-endian),
@@ -255,7 +278,11 @@ static void console() {
   static char line[160];
   static uint8_t n;
   // > 0: once the port is the USB host (Serial.end()), available() says -1
+#ifdef BOARD_TAB5
+  while (Serial.available() > 0) {  // (the USB-C port: the serial port, the host or not)
+#else
   while (!hal::usbHost() && Serial.available() > 0) {
+#endif
     char c = Serial.read();
     if (c != '\n' && c != '\r') {
       if (n < sizeof line - 1) {
@@ -282,6 +309,10 @@ static void console() {
       } else {
         Serial.println(hal::sd() ? "BUSY" : "NOSD");
       }
+#ifdef BOARD_TAB5
+    } else if (!strcmp(line, "bat")) {
+      Serial.printf("BAT %u mV (INA226; 0: no battery)\n", (unsigned)(hal::batteryMv() * 2));
+#else
     } else if (!strcmp(line, "bat")) {
       // the battery's voltage (BAT_ADC, halved by the board): 40 readings over 2 s, in mV at the pin
       int lo = 99999, hi = 0;
@@ -294,6 +325,7 @@ static void console() {
         delay(50);
       }
       Serial.printf("BAT pin %d..%d mV, avg %ld (battery about %ld mV)\n", lo, hi, sum / 40, sum / 20);
+#endif
     } else if (sscanf(line, "touch %d", &x) == 1) {
       touchLogUntil = millis() + x * 1000u;  // (the touch task logs them meanwhile: the app runs on)
       touchLo[0] = touchLo[1] = 9999, touchHi[0] = touchHi[1] = -1;

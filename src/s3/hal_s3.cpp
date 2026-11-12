@@ -3,6 +3,10 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include <SD_MMC.h>
+#ifdef BOARD_TAB5
+#include <SD.h>
+#include <SPI.h>
+#endif
 #include <WiFi.h>
 #include <dirent.h>
 #include <esp_crt_bundle.h>
@@ -11,7 +15,9 @@
 #include <ff.h>
 #include <mbedtls/platform.h>
 #include <mbedtls/sha256.h>
+#ifndef BOARD_TAB5
 #include <soc/rtc_cntl_reg.h>
+#endif
 #include <sys/stat.h>
 
 #include <algorithm>
@@ -22,7 +28,20 @@
 #include "board.h"
 #include "hal.h"
 #include "jobs.h"
+#include "proxy_get.h"
+#include "settings.h"
+#ifdef BOARD_TAB5
+#include <esp_rom_sys.h>
 
+#include "tab5.h"
+#define STAGE(s) tab5::stage(s)
+#else
+#define STAGE(s)
+#endif
+
+#ifdef BOARD_TAB5
+static bool sdSpi;  // (the card in SPI mode: SD_MMC didn't find it)
+#endif
 static bool sdOk, logToSd, computer, disk, recovery;
 // USB disk mode (hal.h): set, then a restart. Kept across that restart only (a power cycle starts as ever)
 #define DISK_MODE 0x4449534B
@@ -108,6 +127,11 @@ static bool hostTestNow;
 static std::vector<std::pair<uint32_t, std::string>>* early;
 
 static void writeLine(const char* line, uint32_t ms) {
+#ifdef BOARD_TAB5
+  if (!usbState) {  // (on the USB-C port at once too: a start that never gets far still says how far)
+    esp_rom_printf("[%6u ms] %s\n", (unsigned)ms, line);
+  }
+#endif
   if (!usbState) {
     if (!early) {
       early = new std::vector<std::pair<uint32_t, std::string>>();
@@ -115,6 +139,20 @@ static void writeLine(const char* line, uint32_t ms) {
     early->emplace_back(ms, line);
     return;
   }
+#ifdef BOARD_TAB5
+  // the Tab5's USB-C port is always the serial console (USB-Serial-JTAG, not the host's port): every line goes there,
+  // and to the SD card's log too (before, with an SD card in, the log went only to the card, so the console went quiet
+  // after "usb host: task made")
+  esp_rom_printf("[%6u ms] %s\n", (unsigned)ms, line);
+  if (!logToSd) {
+    return;
+  }
+  if (FILE* f = fopen(logFile, "a")) {
+    fprintf(f, "%7.1f %s\n", ms / 1000.0, line);
+    fclose(f);
+  }
+  return;
+#endif
   if (!logToSd) {
     Serial.println(line);
   } else if (FILE* f = fopen(logFile, "a")) {
@@ -219,6 +257,7 @@ void board::begin() {
 #ifdef LED_RGB
   rgbLedWrite(LED_RGB, 0, 0, 0);
 #endif
+  STAGE("sd: start");
 #ifdef SD_CLK  // (a board without an SD card: no SD_ pins)
   SD_MMC.setPins(SD_CLK, SD_CMD, SD_D0, SD_D1, SD_D2, SD_D3);
   sdOk = SD_MMC.begin("/sdcard", false);
@@ -226,8 +265,18 @@ void board::begin() {
     SD_MMC.setPins(SD_CLK, SD_CMD, SD_D0);
     sdOk = SD_MMC.begin("/sdcard", true);
   }
+#ifdef BOARD_TAB5
+  if (!sdOk) {  // (the Tab5's slot in SPI mode, as M5Stack's own example has it: CS D3, SCK CLK, MOSI CMD, MISO D0)
+    SD_MMC.end();
+    SPI.begin(SD_CLK, SD_D0, SD_CMD, SD_D3);
+    sdOk = sdSpi = SD.begin(SD_D3, SPI, 25000000, "/sdcard");
+  }
 #endif
+#endif
+  STAGE(sdOk ? "sd: done, mounted" : "sd: done, no card");
+#ifndef BOARD_TAB5  // (the Tab5's Wi-Fi is the ESP32-C6's: nothing asks it anything until a job needs Wi-Fi)
   WiFi.mode(WIFI_OFF);
+#endif
   disk = diskFlag == DISK_MODE && sdOk;
   diskFlag = 0;
   if (disk) {  // the card is the computer's: nothing here touches it, no log on it
@@ -242,9 +291,11 @@ void board::begin() {
   hostTestNow = hostTest == HOST_TEST;
   hostTest = 0;
   if (recoveryFlag == RECOVERY_MODE) {
+#ifndef BOARD_TAB5  // (the Tab5's USB-C is its serial port alone: the host is the USB-A port, always)
     for (; !hostTestNow && millis() < USB_WAIT && !computer; delay(10)) {
       computer = HWCDC::isPlugged();
     }
+#endif
     usbKnown();
   }
 }
@@ -287,11 +338,22 @@ static void usbKnown() {
 // the USB port back to the serial port: a restart (esp_restart) keeps the host's choice, and a computer on it
 // then wouldn't find the board until it's reset by its button
 static void phyToSerial() {
+#ifndef BOARD_TAB5
   CLEAR_PERI_REG_MASK(RTC_CNTL_USB_CONF_REG, RTC_CNTL_SW_HW_USB_PHY_SEL_M | RTC_CNTL_SW_USB_PHY_SEL_M);
+#endif
 }
 
 void board::usbBegin() {
   usbState = 2;
+#ifdef BOARD_TAB5
+  // two ports: the USB-A one is the host (the P4's USB-OTG HS), the USB-C one stays the serial port (USB-Serial-JTAG)
+  if (!disk && !recovery) {
+    STAGE("usb host: start");
+    usbHostBegin();
+    STAGE("usb host: task made");
+  }
+  return;
+#endif
   if (disk) {
     esp_register_shutdown_handler(phyToSerial);
     Serial.end();
@@ -319,7 +381,9 @@ void board::usbBegin() {
 void board::loop() {
   if (usbState < 2) {  // a computer on the port or not (board::begin), then the port as that wants it
     if (!usbState) {
+#ifndef BOARD_TAB5  // (the Tab5: never on the host's port)
       computer = computer || (!hostTestNow && HWCDC::isPlugged());  // (the host test: the host, whatever is on the port)
+#endif
       if (computer || hostTestNow || millis() >= USB_WAIT) {
         usbKnown();
       }
@@ -404,6 +468,12 @@ bool hal::recoveryMode() {
 }
 
 void hal::recoveryModeSet(bool on) {
+#ifdef BOARD_TAB5
+  if (on) {
+    hal::log("usb: no recovery mode on the Tab5");
+    return;
+  }
+#endif
   recoveryFlag = on ? RECOVERY_MODE : 0;
   hal::log("usb: %s recovery mode: restarting", on ? "into" : "out of");
   flushLog();
@@ -411,11 +481,18 @@ void hal::recoveryModeSet(bool on) {
 }
 
 bool hal::computerMidi() {
+#ifdef BOARD_TAB5
+  return false;
+#endif
   bool on = false;
   return hal::load("computer", &on, 1) && on;
 }
 
 void hal::computerMidiSet(bool on) {
+#ifdef BOARD_TAB5
+  hal::log("usb: no USB MIDI for a computer on the Tab5");
+  return;
+#endif
   hal::save("computer", &on, 1);
   if (computer) {
     hal::log("usb: %s for the computer: restarting", on ? "USB MIDI" : "the serial port");
@@ -429,6 +506,12 @@ bool hal::onComputer() {
 }
 
 void hal::diskModeSet(bool on) {
+#ifdef BOARD_TAB5
+  if (on) {
+    hal::log("usb: no USB disk mode on the Tab5");
+    return;
+  }
+#endif
   diskFlag = on ? DISK_MODE : 0;
   hal::log("usb: %s USB disk mode: restarting", on ? "into" : "out of");
   flushLog();
@@ -439,6 +522,13 @@ bool hal::sdSpace(uint64_t& total, uint64_t& used) {
   if (!sdOk) {
     return false;
   }
+#ifdef BOARD_TAB5
+  if (sdSpi) {
+    total = SD.totalBytes();
+    used = SD.usedBytes();
+    return true;
+  }
+#endif
   total = SD_MMC.totalBytes();
   used = SD_MMC.usedBytes();
   return true;
@@ -447,7 +537,9 @@ bool hal::sdSpace(uint64_t& total, uint64_t& used) {
 bool hal::load(const char* key, void* p, size_t n) {
   Preferences prefs;
   prefs.begin("fm1buddy", false);
-  bool ok = prefs.getBytesLength(key) == n && prefs.getBytes(key, p, n) == n;
+  // (isKey first: a key never saved is the usual case, e.g. "sleep", read every second, and getBytesLength on it
+  // logs an NVS NOT_FOUND error each time)
+  bool ok = prefs.isKey(key) && prefs.getBytesLength(key) == n && prefs.getBytes(key, p, n) == n;
   prefs.end();
   return ok;
 }
@@ -459,6 +551,7 @@ void hal::save(const char* key, const void* p, size_t n) {
   prefs.end();
 }
 
+#ifndef BOARD_TAB5  // (the Tab5's: tab5.cpp)
 uint32_t hal::batteryMv() {
   return analogReadMilliVolts(BAT_ADC) * 2;  // (the battery, halved by the board's divider)
 }
@@ -471,6 +564,7 @@ void hal::backlight(uint8_t percent) {
   }
   ledcWrite(TFT_BL, percent * 255 / 100);
 }
+#endif
 
 // --------------------------------------------------------------------------------------------- Wi-Fi ---
 bool hal::wifiScan(std::vector<Ap>& out) {
@@ -544,6 +638,15 @@ static esp_err_t onEvent(esp_http_client_event_t* e) {
 
 int hal::get(const char* url, const char* path, std::string* etag, void (*progress)(uint32_t, uint32_t),
              std::string& err) {
+  if (proxyUsed()) {  // Settings > Proxy: ESP-IDF's client has none (proxy_get.cpp)
+    hal::log("get: %s via %s proxy %s:%u", url, proxy.kind == PROXY_SOCKS5 ? "SOCKS5" : "HTTP", proxy.host,
+             (unsigned)proxy.port);
+    int code = proxyGet(proxy, url, path, etag, progress, err);
+    if (code != 200 && code != 304) {
+      hal::log("get: %d %s", code, err.c_str());
+    }
+    return code;
+  }
   std::string tag;
   esp_http_client_config_t c = {};
   c.url = url;
