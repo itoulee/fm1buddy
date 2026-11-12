@@ -25,3 +25,22 @@ Settings has "Turn screen 180" on the Tab5 (kept; the board restarts).
 `pio run -e sim-tab5` is the simulator at the Tab5's size (640x360).
 
 None of this has run on a Tab5 yet: it builds, and the simulator shows the layout at 640x360.
+
+## Flashing without losing the settings
+
+The merged image (`firmware.factory.bin`, written at 0x0) covers the NVS partition (0x9000-0xDFFF) with 0xFF, so
+it clears the settings (Wi-Fi, theme, proxy) each time. To update and keep them, write only otadata and the app:
+
+    esptool --chip esp32p4 -b 1500000 write-flash 0xe000 boot_app0.bin 0x10000 firmware.bin
+
+## The log, and a main loop that stops
+
+Every log line (any task's) goes to a queue that a task of its own writes out: to the USB-C console (HWCDC, tx
+timeout 0: a computer that isn't reading never holds anything up; the newest 8 KB wait for it) and, in batches, to
+`/sdcard/fm1buddy/log.txt` (the run before: `log-1.txt`). So the log goes on when the main loop doesn't.
+
+The main loop says where it is each time round (`board::beat`). If it doesn't for 8 s, the log has `stall:` lines: where
+it was, its task's state and where it was switched out, eight samples of core 1's PC (the P4's PC recorder), and how
+often core 1's idle task, the USB host task and USB events ran in the last second. At 30 s it restarts, and the next
+start logs `crash: main loop stuck at ...`. Decode the addresses with
+`riscv32-esp-elf-addr2line -pfiaC -e firmware.elf ADDR...` against the same build's firmware.elf.
