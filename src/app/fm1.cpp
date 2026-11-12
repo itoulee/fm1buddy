@@ -210,8 +210,30 @@ static std::string modelOf(const char* s) {
   if (!strncasecmp(s, "ota-", 4)) {
     s += 4;
   }
+  // M-VAVE's FM1 Open (sdk/WebUpdate.js): the running firmware says "FM1_OFFICIAL_OPEN", "FM1_COMMUNITY_<n>" or
+  // "FM-1_8nnnnnn", its loader "ota-FM1C_<build>" (or the vendor's "ota-FM-1_015"): all of them an FM-1
+  if (!strncasecmp(s, "FM1_", 4) || !strncasecmp(s, "FM1C_", 5)) {
+    return "FM-1";
+  }
   const char* us = strrchr(s, '_');
   return std::string(s, us ? us - s : strlen(s));
+}
+
+// FM1 Open's identities (as sdk/WebUpdate.js's openIdentity): its updater wants to be armed first (openArm)
+static bool openIdentity(const char* t) {
+  if (!strcmp(t, "FM1_OFFICIAL_OPEN")) {
+    return true;
+  }
+  const char* digits = !strncmp(t, "FM1_COMMUNITY_", 14) ? t + 14 : !strncmp(t, "FM-1_8", 6) && strlen(t) == 12 ? t + 5 : 0;
+  if (!digits || !*digits) {
+    return false;
+  }
+  for (; *digits; digits++) {
+    if (*digits < '0' || *digits > '9') {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool isSmk(const char* model) {
@@ -434,6 +456,15 @@ static bool parseIdentity(const uint8_t* pkt, uint32_t n, Fm1Id& id) {
     id.text[k++] = (char)d[i];
   }
   id.text[k] = 0;
+  // FM1 Open: "FM1_OFFICIAL_OPEN", "FM1_COMMUNITY_<n>", its loader "ota-FM1C_<build hex>": an FM-1 (modelOf)
+  bool ota = !strncasecmp(id.text, "ota-", 4);
+  const char* bare = id.text + (ota ? 4 : 0);
+  if (!strncasecmp(bare, "FM1_", 4) || !strncasecmp(bare, "FM1C_", 5)) {
+    snprintf(id.model, sizeof id.model, "%sFM-1", ota ? "ota-" : "");
+    const char* us = strrchr(id.text, '_');
+    id.version = us ? atoi(us + 1) : 0;
+    return true;
+  }
   // MODEL_123
   char* us = strrchr(id.text, '_');
   if (!us || us == id.text || !us[1] || us - id.text >= (int)sizeof id.model) {
@@ -457,7 +488,9 @@ static void wait(uint32_t ms) {
 
 // the device can be an FM-1 (or an SMK-37): by its USB name (never probe other gear)
 static bool candidateDev(const midi::Dev& v) {
-  static const char* NAMES[] = {"fm-1", "felucca", "ota", "composite", "sinco", "usb-midi", "smk-37", "mke-p37", "starrykey"};
+  // ("fm1": M-VAVE's FM1 Open V14 calls its USB MIDI device "FM1 Community", with no hyphen; without it that FM-1 was
+  // never asked who it is, so it never showed as connected, though Big Screen, which matches "fm1", reached it)
+  static const char* NAMES[] = {"fm-1", "fm1", "felucca", "ota", "composite", "sinco", "usb-midi", "smk-37", "mke-p37", "starrykey"};
   char lower[sizeof v.name];
   uint32_t i = 0;
   for (; v.name[i]; i++) {
@@ -543,6 +576,8 @@ void fm1::watch() {
       s.serial = v.serial;
       s.askAt = now + 1500;  // it settles first
       s.done = !candidateDev(v);
+      hal::log("fm1: %d (%s, %04X:%04X): %s", d, v.name, v.vid, v.pid,
+               s.done ? "not an FM-1 by its name: not asked" : "may be an FM-1: asking who it is in 1.5 s");
       continue;
     }
     if (s.done) {
@@ -555,17 +590,27 @@ void fm1::watch() {
         midi::send(d, HS_QUERY, sizeof HS_QUERY);
         s.sentAt = now;
         s.tries++;
+        if (s.tries <= 3 || s.tries == 14) {
+          hal::log("fm1: %d: identity query sent (SysEx, %u bytes, try %u)", d, (unsigned)sizeof HS_QUERY, s.tries);
+        }
       }
     } else if (uint32_t n = midi::sysex(d, pkt)) {
       if (parseIdentity(pkt, n, s.id)) {
         s.ok = s.done = true;
         midi::seq++;
-        hal::log("fm1: %d is %s", d, s.id.text);
+        hal::log("fm1: %d is %s (model %s, version %u): connected", d, s.id.text, s.id.model, (unsigned)s.id.version);
+      } else {
+        hal::log("fm1: %d: SysEx in, %u bytes, not an identity: %02X %02X %02X %02X %02X %02X ...", d, (unsigned)n,
+                 pkt[0], n > 1 ? pkt[1] : 0, n > 2 ? pkt[2] : 0, n > 3 ? pkt[3] : 0, n > 4 ? pkt[4] : 0,
+                 n > 5 ? pkt[5] : 0);
       }
     } else if (now - s.sentAt > 1000) {
       s.sentAt = 0;
       s.askAt = now + (s.tries < 2 ? 0 : 4000);
       s.done = s.tries >= 14;
+      if (s.done) {
+        hal::log("fm1: %d (%s): no identity after %u tries: given up (not shown as an FM-1)", d, v.name, s.tries);
+      }
       if (s.tries == 2) {
         hal::log("fm1: %d (%s) doesn't answer yet: asking every 5 s, for a minute", d, v.name);
       }
@@ -773,6 +818,73 @@ static bool upgrade(int d) {
   return sent;
 }
 
+// a reply to cmd from d (its payload into out), waited for up to ms; -1 if none
+static int query(int d, uint8_t cmd, const uint8_t* payload, uint32_t n, uint8_t* out, uint32_t max, uint32_t ms) {
+  uint8_t wire[2 + (7 + 64) * 8 / 7 + 2];
+  uint32_t w = fm1::frame(cmd, payload, n, wire);
+  midi::drain(d);
+  if (!w || !midi::sendWait(d, wire, w, 1000)) {
+    return -1;
+  }
+  uint8_t pkt[SYSEX_MAX];
+  for (uint32_t start = hal::millis(); hal::millis() - start < ms; wait(2)) {
+    if (uint32_t k = midi::sysex(d, pkt)) {
+      int r = fm1::unframe(pkt, k, cmd, out, max);
+      if (r >= 0) {
+        return r;
+      }
+    }
+  }
+  return -1;
+}
+
+static int hexNibble(char c) {
+  return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+}
+
+// FM1 Open's updater (sdk/WebUpdate.js, its "tagged" route): its capability (cmd 0x31: "FMC1", family, state, build),
+// then armed for this package (cmd 0x32: 1, family, image size, a 32-byte build tag; it answers 0) before the usual
+// upgrade message. The tag: the .fwsc's SHA-256 (what M-VAVE's own stock package uses as its build ID; for other
+// packages FM1 Open's web page has a build ID of its own that we don't have). 0, or an error
+static const char* openArm(int d, const Pkg& pkg) {
+  static char err[96];
+  uint8_t cap[64];
+  int n = query(d, 0x31, 0, 0, cap, sizeof cap, 1500);
+  if (n < 0) {
+    note("FM1 Open: no capability reply: upgrading as the stock firmware does");
+    return 0;  // (as the web page's forced "legacy" route)
+  }
+  if (n != 47 || memcmp(cap, "FMC1", 4) || cap[4] != 1) {
+    note("FM1 Open: capability reply not understood (%d bytes)", n);
+    return "The FM-1's updater isn't one fm1buddy knows (FM1 Open).";
+  }
+  uint8_t family = cap[5], state = cap[6];
+  note("FM1 Open: family %u, state %u, updater %u, error %u", family, state, cap[7], cap[46]);
+  if (state != 0) {
+    return "The FM-1 is busy with another update: switch it off and on.";
+  }
+  uint8_t arm[6 + 32];
+  arm[0] = 1;
+  arm[1] = family;
+  arm[2] = pkg.size & 0xFF, arm[3] = pkg.size >> 8 & 0xFF, arm[4] = pkg.size >> 16 & 0xFF, arm[5] = pkg.size >> 24;
+  for (int i = 0; i < 32; i++) {
+    int hi = hexNibble(pkg.sha256[2 * i]), lo = hexNibble(pkg.sha256[2 * i + 1]);
+    arm[6 + i] = hi < 0 || lo < 0 ? 0 : hi << 4 | lo;
+  }
+  if (!memcmp(cap + 14, arm + 6, 32)) {
+    return "That firmware is already on the FM-1.";
+  }
+  uint8_t ack[8];
+  n = query(d, 0x32, arm, sizeof arm, ack, sizeof ack, 1500);
+  note("FM1 Open: armed: %s", n == 1 && ack[0] == 0 ? "yes" : n < 0 ? "no reply" : "refused");
+  hal::log("fm1: FM1 Open: arm for %u bytes: %s", (unsigned)pkg.size, n == 1 && ack[0] == 0 ? "accepted" : n < 0 ? "no reply" : "refused");
+  if (n == 1 && ack[0] == 0) {
+    return 0;
+  }
+  snprintf(err, sizeof err, "The FM-1 (FM1 Open) %s this package: nothing was written.", n < 0 ? "didn't answer for" : "refused");
+  return err;
+}
+
 static const char* write(int d, const Pkg& pkg, Fm1Progress cb) {
   cb(STEP_WRITE, 0, 0);
   note("writing");
@@ -826,6 +938,11 @@ static const char* steps(const Pkg& pkg, Fm1Progress cb) {
   if (!pkg.fits(id)) {
     snprintf(err, sizeof err, "The FM-1 is %s, the package is for %s.", id.text, pkg.product);
     return err;
+  }
+  if (openIdentity(id.text)) {
+    if (const char* e = openArm(d, pkg)) {
+      return e;
+    }
   }
   cb(STEP_VERIFY, 0, 0);
   note("verifying");

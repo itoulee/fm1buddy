@@ -24,6 +24,8 @@ static Source source = SD;
 static bool sourceChosen, hubAsked;
 static int sortBy = NEWEST;
 static std::string kindFilter;  // "": all
+static std::string nameFilter;  // the search box's text ("": all): in a firmware's name, author or file, any case
+static lv_obj_t *searchTa, *searchKb, *optsRow;  // (optsRow: hidden while the keyboard's up, for more rows)
 // the machines a firmware can be for (an SMK-37 package says which model), and which the lists show: the Hub's, the
 // one on the hub until another is picked (-1); the SD card's, all (-1) until one is picked
 enum Machine { FM1,
@@ -126,8 +128,43 @@ static bool forDevice(const FwItem& f) {
   return machineOf(catalog::hub.str(f.product)) == hubShows();
 }
 
+// needle (lower case already) in hay, any case
+static bool hasCi(const char* hay, const std::string& needle) {
+  size_t n = needle.size();
+  for (; *hay; hay++) {
+    size_t i = 0;
+    while (i < n && hay[i] && (char)tolower((unsigned char)hay[i]) == needle[i]) {
+      i++;
+    }
+    if (i == n) {
+      return true;
+    }
+  }
+  return n == 0;
+}
+
+static bool nameMatches(const FwList& l, const FwItem& f, const std::string& q) {
+  if (q.empty()) {
+    return true;
+  }
+  const char* file = l.str(f.file);
+  const char* base = strrchr(file, '/');
+  return hasCi(l.str(f.name), q) || hasCi(l.str(f.author), q) || hasCi(base ? base + 1 : file, q) ||
+         hasCi(l.str(f.product), q);
+}
+
 // the list's rows, in order: on the SD card, the way up and the folders first
 static std::vector<uint32_t> shown() {
+  std::string q;
+  for (char c : nameFilter) {
+    q += (char)tolower((unsigned char)c);
+  }
+  while (!q.empty() && q.back() == ' ') {
+    q.pop_back();
+  }
+  while (!q.empty() && q[0] == ' ') {
+    q.erase(0, 1);
+  }
   const FwList& l = srcList();
   std::vector<uint32_t> v;
   folders.clear();
@@ -159,7 +196,7 @@ static std::vector<uint32_t> shown() {
       }
       continue;
     }
-    if (source == SD || kindFilter.empty() || f.kinds & kind) {
+    if ((source == SD || kindFilter.empty() || f.kinds & kind) && nameMatches(l, f, q)) {
       v.push_back(i);
     }
   }
@@ -345,7 +382,12 @@ static void showCounts() {
   size_t counts[] = {catalog::sd.size(), (size_t)std::count_if(catalog::hub.items.begin(), catalog::hub.items.end(), forDevice)};
   for (int i = 0; i < 2; i++) {
     char s[32];
-    snprintf(s, sizeof s, counts[i] ? "%s  %u" : "%s", names[i], (unsigned)counts[i]);
+    if (i == source && !nameFilter.empty() && counts[i]) {  // searching: the matches, of how many
+      size_t m = std::count_if(rows.begin(), rows.end(), [](uint32_t r) { return r != ROW_UP && !(r & ROW_FOLDER); });
+      snprintf(s, sizeof s, "%s  %u/%u", names[i], (unsigned)m, (unsigned)counts[i]);
+    } else {
+      snprintf(s, sizeof s, counts[i] ? "%s  %u" : "%s", names[i], (unsigned)counts[i]);
+    }
     if (srcButton[i]) {
       lv_label_set_text(lv_obj_get_child(srcButton[i], 0), s);
     }
@@ -364,7 +406,9 @@ static void fillList() {
     lv_obj_set_width(l, LV_PCT(100));
     lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_pad_all(l, 12, 0);
-    if (source == SD && hal::sd() && !catalog::sd.empty()) {
+    if (!nameFilter.empty() && !srcList().empty()) {
+      lv_label_set_text_fmt(l, "No firmware matches \"%s\".", nameFilter.c_str());
+    } else if (source == SD && hal::sd() && !catalog::sd.empty()) {
       lv_label_set_text(l, "None for that machine on the SD card.");
     } else if (source == SD) {
       lv_label_set_text(l, hal::sd() ? "No firmwares in /fm1 on the SD card. Save some from the Hub, or copy .fwsc files there (in folders too)."
@@ -525,6 +569,94 @@ static void pickSort(lv_event_t* e) {
   fromTop();
 }
 
+// ------------------------------------------------------------------------------------------ the search ---
+// a box above the list: what's typed filters it at once (name, author or file, any case); the keyboard comes up
+// under the list while the box is tapped, and goes with its OK key or its keyboard key. The X empties the box
+static void searchKbClose() {
+  if (searchKb) {
+    lv_obj_t* kb = searchKb;
+    searchKb = 0;
+    lv_obj_delete(kb);
+    if (searchTa) {
+      lv_obj_remove_state(searchTa, LV_STATE_FOCUSED);
+    }
+    if (optsRow) {
+      lv_obj_remove_flag(optsRow, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (list) {
+      int32_t y = lv_obj_get_scroll_y(list);
+      fillList();  // (the list is taller again: more rows)
+      lv_obj_update_layout(list);
+      lv_obj_scroll_to_y(list, y, LV_ANIM_OFF);
+      place();
+    }
+  }
+}
+
+static void searchTyped(lv_event_t* e) {
+  const char* txt = lv_textarea_get_text((lv_obj_t*)lv_event_get_target(e));
+  if (nameFilter == txt) {
+    return;
+  }
+  nameFilter = txt;
+  fillList();
+  showCounts();
+  fromTop();
+}
+
+static void searchKbKey(lv_event_t*) {
+  searchKbClose();
+}
+
+static void searchOpen(lv_event_t* e) {
+  if (searchKb || !list) {
+    return;
+  }
+  lv_obj_t* page = lv_obj_get_parent(list);
+  if (optsRow) {
+    lv_obj_add_flag(optsRow, LV_OBJ_FLAG_HIDDEN);
+  }
+  searchKb = lv_keyboard_create(page);
+  lv_obj_set_size(searchKb, LV_PCT(100), LV_PCT(45));
+  lv_keyboard_set_textarea(searchKb, (lv_obj_t*)lv_event_get_target(e));
+  lv_obj_add_event_cb(searchKb, searchKbKey, LV_EVENT_READY, 0);
+  lv_obj_add_event_cb(searchKb, searchKbKey, LV_EVENT_CANCEL, 0);
+  lv_obj_update_layout(page);
+  fillList();  // (the list is shorter now)
+  fromTop();
+}
+
+static void searchClear(lv_event_t*) {
+  if (searchTa) {
+    lv_textarea_set_text(searchTa, "");  // (VALUE_CHANGED: searchTyped)
+  }
+  nameFilter.clear();
+  searchKbClose();
+  fillList();
+  showCounts();
+  fromTop();
+}
+
+static void searchBox(lv_obj_t* page) {
+  lv_obj_t* r = box(page, LV_FLEX_FLOW_ROW);
+  lv_obj_set_width(r, LV_PCT(100));
+  lv_obj_set_style_pad_column(r, 4, 0);
+  searchTa = lv_textarea_create(r);
+  lv_textarea_set_one_line(searchTa, true);
+  lv_textarea_set_placeholder_text(searchTa, "Search firmware by name or author");
+  lv_textarea_set_text(searchTa, nameFilter.c_str());
+  lv_obj_set_height(searchTa, 32);
+  lv_obj_set_flex_grow(searchTa, 1);
+  lv_obj_set_style_pad_ver(searchTa, 6, 0);
+  lv_obj_set_style_text_font(searchTa, &lv_font_montserrat_12, 0);
+  lv_obj_add_event_cb(searchTa, searchOpen, LV_EVENT_CLICKED, 0);
+  lv_obj_add_event_cb(searchTa, searchTyped, LV_EVENT_VALUE_CHANGED, 0);
+  lv_obj_add_event_cb(
+      searchTa, [](lv_event_t*) { searchTa = 0, searchKb = 0, optsRow = 0; }, LV_EVENT_DELETE, 0);  // (the page went, with both)
+  lv_obj_t* x = button(r, LV_SYMBOL_CLOSE, searchClear);
+  lv_obj_set_size(x, 40, 32);
+}
+
 void ui::firmwareSource(bool hub) {
   source = hub ? HUB : SD;
   sourceChosen = true;  // (the SD card's even with none on it: no Wi-Fi then)
@@ -536,6 +668,7 @@ void ui::firmwarePage(lv_obj_t* page) {
     source = HUB;
   }
   refresh = spin = 0;
+  optsRow = 0;
   listFm1 = fm1Now();
   lv_obj_t* head = header(page, 0);
   lv_obj_set_style_pad_column(head, 4, 0);
@@ -557,7 +690,7 @@ void ui::firmwarePage(lv_obj_t* page) {
     lv_obj_set_style_margin_hor(spin, 7, 0);
 
     // for what, what kind, and in what order
-    lv_obj_t* opts = box(page, LV_FLEX_FLOW_ROW);
+    lv_obj_t* opts = optsRow = box(page, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(opts, 4, 0);
     machineMenu(opts);
     uint32_t bits = 0;
@@ -595,8 +728,12 @@ void ui::firmwarePage(lv_obj_t* page) {
     }
   }
   if (source == SD && !catalog::sd.empty()) {
-    lv_obj_t* opts = box(page, LV_FLEX_FLOW_ROW);
+    lv_obj_t* opts = optsRow = box(page, LV_FLEX_FLOW_ROW);
     machineMenu(opts);
+  }
+  searchTa = searchKb = 0;
+  if (!srcList().empty()) {
+    searchBox(page);
   }
   list = scroller(page);
   lv_obj_set_layout(list, LV_LAYOUT_NONE);  // (the rows are where they're scrolled to: place)
@@ -620,6 +757,7 @@ void ui::firmwarePage(lv_obj_t* page) {
     jobs::hubList(false);
   }
   fillList();
+  showCounts();  // (again: a search's matches)
   restoreScroll();
   showStatus();
   tick = showStatus;
