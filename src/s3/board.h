@@ -31,4 +31,11 @@ uint32_t computerOut(const uint8_t* packets, uint32_t n);
 void bleLoop();
 void blePause(bool on);
 uint32_t bleOut(int d, const uint8_t* packets, uint32_t n);
+// the main loop says where it is, each time round (hal_s3.cpp: the Tab5's stall watch; nothing elsewhere)
+void beat(const char* at);
+// the Tab5: Serial (the USB-C port's USB-Serial-JTAG) is begun, the log goes to it now (it never waits)
+void serialReady();
+// the USB host task (usb_s3.cpp): its rounds, and the events its interrupt has had, so far
+uint32_t usbHostLoops();
+uint32_t usbEvents();
 }  // namespace board

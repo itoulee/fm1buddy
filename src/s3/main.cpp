@@ -227,7 +227,16 @@ static uint32_t tick() {
 }
 
 void setup() {
+#ifdef BOARD_TAB5
+  // the log's console (hal_s3.cpp): it never waits for a computer that isn't reading (what doesn't fit is dropped;
+  // what's waiting is the newest 8 KB, there when it starts reading)
+  Serial.setTxBufferSize(8192);
+  Serial.setTxTimeoutMs(0);
+#endif
   Serial.begin(115200);
+#ifdef BOARD_TAB5
+  board::serialReady();
+#endif
   STAGE("setup: start");
   // the screen first, and the app's frame on it (ui::frame): then the rest
   hal::log("boot: screen at %u ms", (unsigned)millis());
@@ -292,6 +301,12 @@ static void console() {
     }
     line[n] = 0;
     n = 0;
+#ifdef BOARD_TAB5
+    Serial.setTxTimeoutMs(100);  // (a command: the computer is reading, and the answer is to arrive whole)
+    struct Back {
+      ~Back() { Serial.setTxTimeoutMs(0); }
+    } back;
+#endif
     int x, y, x2, y2;
     if (!strcmp(line, "log")) {
       board::printLog();
@@ -420,11 +435,17 @@ static void script() {
 }
 
 void loop() {
+  board::beat("console");
   console();
   touchLogEnd();
+  board::beat("script");
   script();
+  board::beat("board");
   board::loop();
+  board::beat("bluetooth");
   board::bleLoop();
+  board::beat("lvgl");
   uint32_t wait = lv_timer_handler();
+  board::beat("idle");
   delay(wait > 5 ? 5 : wait);
 }

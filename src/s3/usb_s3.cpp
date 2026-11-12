@@ -430,6 +430,10 @@ static std::atomic<uint32_t> irqEv[4];
 
 // the controller's state, raw, for the log: port (HPRT), interrupts pending (GINTSTS) and asked for (GINTMSK), their
 // global enable (GAHBCFG bit 0), and TinyUSB's events so far
+uint32_t board::usbEvents() {
+  return irqEv[0] + irqEv[1] + irqEv[2] + irqEv[3];
+}
+
 static void usbRegs(const char* why) {
   hal::log("usb: %s: HPRT %08X GINTSTS %08X GINTMSK %08X GAHBCFG %08X, events: attach %u remove %u xfer %u other %u",
            why, (unsigned)REG_READ(DWC2_BASE + 0x440), (unsigned)REG_READ(DWC2_BASE + 0x014),
@@ -692,6 +696,12 @@ void hal::usbRestart() {
   }
 }
 
+static std::atomic<uint32_t> hostLoops{0};
+
+uint32_t board::usbHostLoops() {
+  return hostLoops;
+}
+
 static void hostTask(void*) {
   // the USB controller's clock, and the PHY to it as a host (TinyUSB leaves both to ESP-IDF)
   usb_phy_config_t pc = {};
@@ -730,6 +740,7 @@ static void hostTask(void*) {
   usbRegs("at start");
   uint32_t started = millis(), regsAt = started, lastEv = 0;
   for (;;) {
+    hostLoops++;
     tuh_task_ext(1, false);  // (waits 1 ms at most for an event: the rest of the loop runs either way)
     portWatch();
     // the registers once a second for the first 10 s, then every 10 s while the event count moves or a device is

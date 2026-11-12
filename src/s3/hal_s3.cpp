@@ -31,7 +31,11 @@
 #include "proxy_get.h"
 #include "settings.h"
 #ifdef BOARD_TAB5
+#include <esp_freertos_hooks.h>
 #include <esp_rom_sys.h>
+#include <soc/assist_debug_reg.h>
+
+#include <atomic>
 
 #include "tab5.h"
 #define STAGE(s) tab5::stage(s)
@@ -81,6 +85,24 @@ static void onPanic(arduino_panic_info_t* info, void*) {
   crash.magic = CRASH_MAGIC;
 }
 
+static const char* resetName(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON: return "power on";
+    case ESP_RST_EXT: return "reset pin";
+    case ESP_RST_SW: return "restart (software)";
+    case ESP_RST_PANIC: return "crash (panic)";
+    case ESP_RST_INT_WDT: return "interrupt watchdog";
+    case ESP_RST_TASK_WDT: return "task watchdog";
+    case ESP_RST_WDT: return "watchdog";
+    case ESP_RST_DEEPSLEEP: return "deep sleep";
+    case ESP_RST_BROWNOUT: return "brownout";
+    case ESP_RST_SDIO: return "SDIO";
+    case ESP_RST_USB: return "USB";
+    case ESP_RST_JTAG: return "JTAG";
+    default: return "?";
+  }
+}
+
 static void logCrash() {
   if (crash.magic != CRASH_MAGIC || crash.n > 24) {
     crash.magic = 0;
@@ -111,8 +133,13 @@ static bool newLog() {
 }
 static volatile bool wifiUp, radio;
 
-// lines from other tasks wait here for the main loop: only it writes them (to the SD card or the serial port)
+// lines from other tasks wait here for the main loop: only it writes them (to the SD card or the serial port). The
+// Tab5: every line waits here, for the log task (below)
+#ifdef BOARD_TAB5
+#define LOG_Q 256  // (40 KB, in PSRAM)
+#else
 #define LOG_Q 32
+#endif
 static char (*logQ)[160];
 static uint32_t logW, logR;
 static portMUX_TYPE logMux = portMUX_INITIALIZER_UNLOCKED;
@@ -126,12 +153,91 @@ static bool hostTestNow;
 // lines said before that's known: then they go where the log goes (the SD card, or the serial port)
 static std::vector<std::pair<uint32_t, std::string>>* early;
 
-static void writeLine(const char* line, uint32_t ms) {
 #ifdef BOARD_TAB5
-  if (!usbState) {  // (on the USB-C port at once too: a start that never gets far still says how far)
-    esp_rom_printf("[%6u ms] %s\n", (unsigned)ms, line);
+// The Tab5's log: every line (any task's, the main loop's too) goes into logQ, and a task of its own (logTask) writes
+// them out: to the USB-C console (Arduino's HWCDC, which never waits: its tx timeout is 0 and it has an 8 KB ring, so
+// a computer on the port that isn't reading costs nothing), and to the SD card's log (opened, added to and closed
+// once a batch). So nothing the UI does waits on the console or the card, and the log goes on when the main loop
+// doesn't (it says so: the stall watch, below)
+static SemaphoreHandle_t logLock;  // writeLine's: the log task's, and earlyLines' (the main loop's, once)
+static TaskHandle_t logTask;
+static std::atomic<uint32_t> logDropped{0};
+static volatile bool serialUp;  // Serial (HWCDC) begun (board::serialReady, from setup)
+
+static void consoleOut(const char* s, size_t n) {
+  if (serialUp) {
+    Serial.write((const uint8_t*)s, n);  // (drops what doesn't fit: never waits)
+  } else {
+    esp_rom_printf("%s", s);  // (before Serial.begin: the ROM's, which waits 5 ms at most for a computer not reading)
   }
-#endif
+}
+
+static void writeLine(const char* line, uint32_t ms, std::string* sd = 0) {
+  if (logLock) {
+    xSemaphoreTakeRecursive(logLock, portMAX_DELAY);
+  }
+  char out[200];
+  int n = snprintf(out, sizeof out, "[%6u ms] %s\n", (unsigned)ms, line);
+  consoleOut(out, n < (int)sizeof out ? n : sizeof out - 1);
+  if (!usbState) {
+    if (!early) {
+      early = new std::vector<std::pair<uint32_t, std::string>>();
+    }
+    early->emplace_back(ms, line);
+  } else if (logToSd) {
+    char l[200];
+    snprintf(l, sizeof l, "%7.1f %s\n", ms / 1000.0, line);
+    if (sd) {
+      *sd += l;  // (the log task's batch)
+    } else if (FILE* f = fopen(logFile, "a")) {
+      fputs(l, f);
+      fclose(f);
+    }
+  }
+  if (logLock) {
+    xSemaphoreGiveRecursive(logLock);
+  }
+}
+
+static void logLoop(void*) {
+  char line[160];
+  std::string batch;
+  for (;;) {
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(200));
+    batch.clear();
+    xSemaphoreTakeRecursive(logLock, portMAX_DELAY);
+    for (int k = 0; k < LOG_Q; k++) {
+      portENTER_CRITICAL(&logMux);
+      bool any = logR != logW;
+      if (any) {
+        memcpy(line, logQ[logR % LOG_Q], sizeof line);
+        logR++;
+      }
+      portEXIT_CRITICAL(&logMux);
+      if (!any) {
+        break;
+      }
+      uint32_t ms;
+      memcpy(&ms, line + sizeof line - 4, 4);
+      line[sizeof line - 5] = 0;
+      writeLine(line, ms, &batch);
+    }
+    if (uint32_t lost = logDropped.exchange(0)) {
+      char l[48];
+      snprintf(l, sizeof l, "log: %u lines lost (too many at once)", (unsigned)lost);
+      writeLine(l, ::millis(), &batch);
+    }
+    if (!batch.empty() && logToSd) {
+      if (FILE* f = fopen(logFile, "a")) {
+        fwrite(batch.data(), 1, batch.size(), f);
+        fclose(f);
+      }
+    }
+    xSemaphoreGiveRecursive(logLock);
+  }
+}
+#else
+static void writeLine(const char* line, uint32_t ms) {
   if (!usbState) {
     if (!early) {
       early = new std::vector<std::pair<uint32_t, std::string>>();
@@ -139,20 +245,6 @@ static void writeLine(const char* line, uint32_t ms) {
     early->emplace_back(ms, line);
     return;
   }
-#ifdef BOARD_TAB5
-  // the Tab5's USB-C port is always the serial console (USB-Serial-JTAG, not the host's port): every line goes there,
-  // and to the SD card's log too (before, with an SD card in, the log went only to the card, so the console went quiet
-  // after "usb host: task made")
-  esp_rom_printf("[%6u ms] %s\n", (unsigned)ms, line);
-  if (!logToSd) {
-    return;
-  }
-  if (FILE* f = fopen(logFile, "a")) {
-    fprintf(f, "%7.1f %s\n", ms / 1000.0, line);
-    fclose(f);
-  }
-  return;
-#endif
   if (!logToSd) {
     Serial.println(line);
   } else if (FILE* f = fopen(logFile, "a")) {
@@ -160,8 +252,15 @@ static void writeLine(const char* line, uint32_t ms) {
     fclose(f);
   }
 }
+#endif
 
 static void flushLog() {
+#ifdef BOARD_TAB5
+  if (logTask) {
+    xTaskNotifyGive(logTask);
+  }
+  return;
+#endif
   char line[160];
   for (;;) {
     portENTER_CRITICAL(&logMux);
@@ -182,6 +281,11 @@ static void flushLog() {
 
 void board::logNow() {
   flushLog();
+#ifdef BOARD_TAB5
+  for (uint32_t t = ::millis(); logR != logW && ::millis() - t < 500;) {
+    delay(5);
+  }
+#endif
 }
 
 static volatile bool psramOn;  // the USB host doesn't start meanwhile: its buffers must be in the internal RAM
@@ -209,6 +313,24 @@ void hal::log(const char* fmt, ...) {
   vsnprintf(buf, sizeof buf - 4, fmt, a);
   va_end(a);
   uint32_t ms = ::millis();
+#ifdef BOARD_TAB5
+  if (logTask) {
+    memcpy(buf + sizeof buf - 4, &ms, 4);
+    bool queued = false;
+    portENTER_CRITICAL(&logMux);
+    if (logW - logR < LOG_Q) {
+      memcpy(logQ[logW % LOG_Q], buf, sizeof buf);
+      logW++;
+      queued = true;
+    }
+    portEXIT_CRITICAL(&logMux);
+    if (!queued) {
+      logDropped++;
+    }
+    xTaskNotifyGive(logTask);
+    return;
+  }
+#endif
   if (!mainTask || xTaskGetCurrentTaskHandle() == mainTask) {
     if (logQ) {
       flushLog();
@@ -228,23 +350,176 @@ void hal::log(const char* fmt, ...) {
   portEXIT_CRITICAL(&logMux);
 }
 
+#ifdef BOARD_TAB5
+// ------------------------------------------------------------------------------------------ stall watch ---
+// The main loop (LVGL, the screen, the pages) says where it is (board::beat) each time round. If it doesn't for 8 s,
+// the log says where it was, what its task is doing (its state; where it was switched out, if it was), and where
+// core 1 (its core: the USB host task's too) is running, sampled with the P4's PC recorder (ASSIST_DEBUG); then
+// every 5 s again, and at 30 s the board restarts, the same kept for the next start's log ("crash: main loop stuck")
+// as a crash is. Decode the addresses against this build's firmware.elf:
+//   riscv32-esp-elf-addr2line -pfiaC -e firmware.elf ADDR...
+#define STALL_LOG_MS 8000
+#define STALL_RESTART_MS 30000
+static std::atomic<uint32_t> loopBeat{0};
+static const char* volatile loopAt = "start";
+static std::atomic<uint32_t> idle1{0};
+
+void board::beat(const char* at) {
+  loopAt = at;
+  loopBeat++;
+}
+
+void board::serialReady() {
+  serialUp = true;
+}
+
+static bool idleHook1() {
+  idle1++;
+  return true;
+}
+
+// where core 1 is now (and its stack pointer): the recorder stopped for a moment, read, started again
+static uint32_t core1Pc(uint32_t* sp) {
+  uint32_t on = ASSIST_DEBUG_CORE_1_RCD_PDEBUGEN | ASSIST_DEBUG_CORE_1_RCD_RECORDEN;
+  REG_WRITE(ASSIST_DEBUG_CORE_1_RCD_EN_REG, on);
+  esp_rom_delay_us(5);
+  REG_WRITE(ASSIST_DEBUG_CORE_1_RCD_EN_REG, ASSIST_DEBUG_CORE_1_RCD_PDEBUGEN);  // (holds the last one)
+  uint32_t pc = REG_READ(ASSIST_DEBUG_CORE_1_RCD_PDEBUGPC_REG);
+  if (sp) {
+    *sp = REG_READ(ASSIST_DEBUG_CORE_1_RCD_PDEBUGSP_REG);
+  }
+  REG_WRITE(ASSIST_DEBUG_CORE_1_RCD_EN_REG, on);
+  return pc;
+}
+
+static const char* taskState(eTaskState s) {
+  switch (s) {
+    case eRunning: return "running";
+    case eReady: return "ready (not given the CPU)";
+    case eBlocked: return "blocked (waiting)";
+    case eSuspended: return "suspended";
+    case eDeleted: return "deleted";
+    default: return "?";
+  }
+}
+
+static void stallWatch(void*) {
+  uint32_t beat = loopBeat, since = ::millis(), told = 0;
+  uint32_t idle = idle1, usbLoops = board::usbHostLoops(), usbEv = board::usbEvents();
+  for (;;) {
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    uint32_t now = ::millis();
+    uint32_t dIdle = idle1 - idle, dLoops = board::usbHostLoops() - usbLoops, dEv = board::usbEvents() - usbEv;
+    idle += dIdle, usbLoops += dLoops, usbEv += dEv;
+    if (loopBeat != beat) {
+      if (told) {
+        hal::log("stall: the main loop runs again (it was stuck %u ms at \"%s\")", (unsigned)(now - since),
+                 (const char*)loopAt);
+      }
+      beat = loopBeat;
+      since = now;
+      told = 0;
+      continue;
+    }
+    uint32_t stuck = now - since;
+    if (stuck < STALL_LOG_MS) {
+      continue;
+    }
+    eTaskState st = mainTask ? eTaskGetState(mainTask) : eInvalid;
+    uint32_t spc = 0, sra = 0;
+    if (mainTask && st != eRunning && st != eDeleted) {  // (its context, saved where it was switched out)
+      const uint32_t* top = *(const uint32_t* const*)mainTask;
+      spc = top[0];  // (RvExcFrame: mepc, then ra)
+      sra = top[1];
+    }
+    uint32_t pcs[8], sp = 0;
+    for (int i = 0; i < 8; i++) {
+      pcs[i] = core1Pc(i ? 0 : &sp);
+      esp_rom_delay_us(997);
+    }
+    if (!told || now - told >= 5000) {
+      told = now;
+      hal::log("stall: main loop stuck %u ms at \"%s\", its task %s, switched out at pc %08X ra %08X",
+               (unsigned)stuck, (const char*)loopAt, taskState(st), (unsigned)spc, (unsigned)sra);
+      hal::log("stall: core 1 at %08X %08X %08X %08X %08X %08X %08X %08X (sp %08X)", (unsigned)pcs[0], (unsigned)pcs[1],
+               (unsigned)pcs[2], (unsigned)pcs[3], (unsigned)pcs[4], (unsigned)pcs[5], (unsigned)pcs[6],
+               (unsigned)pcs[7], (unsigned)sp);
+      hal::log("stall: in the last second, core 1 idle %u times, the USB host task round %u times, %u USB events",
+               (unsigned)dIdle, (unsigned)dLoops, (unsigned)dEv);
+    }
+    if (stuck >= STALL_RESTART_MS) {
+      snprintf(crash.reason, sizeof crash.reason, "main loop stuck at %s", (const char*)loopAt);
+      crash.core = 1;
+      crash.pc = spc ? spc : pcs[0];
+      crash.n = 0;
+      crash.bt[crash.n++] = sra;
+      for (uint32_t p : pcs) {
+        crash.bt[crash.n++] = p;
+      }
+      crash.magic = CRASH_MAGIC;
+      hal::log("stall: restarting (the next start logs this as a crash: pc = where it was switched out, then ra, then "
+               "core 1's samples)");
+      board::logNow();
+      delay(200);
+      esp_restart();
+    }
+  }
+}
+
+static void stallWatchBegin() {
+  esp_register_freertos_idle_hook_for_cpu(idleHook1, 1);
+  xTaskCreatePinnedToCore(stallWatch, "stall", 4096, 0, 6, 0, 0);
+}
+#else
+void board::beat(const char*) {}
+void board::serialReady() {}
+#endif
+
 static void usbKnown();
 
 // the lines said before the log had a place
 static void earlyLines() {
+#ifdef BOARD_TAB5
+  if (logLock) {
+    xSemaphoreTakeRecursive(logLock, portMAX_DELAY);
+  }
+#endif
   if (early) {
+#ifdef BOARD_TAB5  // (on the console already, as they were said: to the SD card's log now, in one go)
+    if (logToSd) {
+      if (FILE* f = fopen(logFile, "a")) {
+        for (auto& l : *early) {
+          fprintf(f, "%7.1f %s\n", l.first / 1000.0, l.second.c_str());
+        }
+        fclose(f);
+      }
+    }
+#else
     for (auto& l : *early) {
       writeLine(l.second.c_str(), l.first);
     }
+#endif
     delete early;
     early = 0;
   }
+#ifdef BOARD_TAB5
+  if (logLock) {
+    xSemaphoreGiveRecursive(logLock);
+  }
+#endif
 }
 
 void board::begin() {
   mainTask = xTaskGetCurrentTaskHandle();
   set_arduino_panic_handler(onPanic, 0);
   logQ = (char (*)[160])heap_caps_malloc(LOG_Q * 160, MALLOC_CAP_SPIRAM);
+#ifdef BOARD_TAB5
+  logLock = xSemaphoreCreateRecursiveMutex();
+  if (logQ && logLock) {
+    xTaskCreatePinnedToCore(logLoop, "log", 6144, 0, 2, &logTask, 0);
+  }
+  stallWatchBegin();
+#endif
   // (not heap_caps_malloc_extmem_enable(): small blocks must stay internal, the USB host's DMA can't reach PSRAM. The
   // big ones go there anyway: LVGL's pool, MIDI's buffers, TLS's)
   // and TLS's buffers (about 40 KB a connection): with Bluetooth on, the internal RAM can't spare them
@@ -315,7 +590,7 @@ static void usbKnown() {
       logToSd = true;
     }
     earlyLines();
-    hal::log("fm1buddy: recovery mode, last reset: %d", (int)esp_reset_reason());
+    hal::log("fm1buddy: recovery mode, last reset: %d (%s)", (int)esp_reset_reason(), resetName(esp_reset_reason()));
     logCrash();
     return;
   }
@@ -332,6 +607,7 @@ static void usbKnown() {
   earlyLines();
   hal::log("fm1buddy: sd %s, usb %s%s, last reset: %d", sdOk ? "mounted" : "none",
            computer ? (hal::computerMidi() ? "USB MIDI (a computer)" : "serial (a computer)") : "host", test ? " (a test: 40 s)" : "", (int)esp_reset_reason());
+  hal::log("fm1buddy: last reset: %s", resetName(esp_reset_reason()));
   logCrash();
 }
 
