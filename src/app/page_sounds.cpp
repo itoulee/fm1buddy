@@ -455,7 +455,9 @@ void ui::soundsPage(lv_obj_t* page) {
   navRow(body, LV_SYMBOL_IMAGE "  Big Screen", "its firmwares only", mirrorPage, t.dim);
   navRow(body, LV_SYMBOL_AUDIO "  Record audio", record::recording() ? "recording" : "", recordPage, t.knob[0]);
   navRow(body, devText(LV_SYMBOL_SAVE "  Back up the FM-1").c_str(), "", backupPage, t.dim);
+#ifndef BOARD_TAB5  // (FM-1 Recover: not on the Tab5, hal::keyStart)
   navRow(body, LV_SYMBOL_WARNING "  Unbrick", devText("FM-1 won't start?").c_str(), recoverStartPage, t.dim);
+#endif
 
   // the device
   std::string opts;
