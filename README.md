@@ -4,6 +4,18 @@
 > goes there) to the [M5Stack Tab5](https://docs.m5stack.com/en/core/Tab5). Based on upstream `main` at `ef5512f`
 > (2026-11-11), with all of upstream's code. Upstream's own README follows below the line.
 
+## v1.0 (2026-11-13)
+
+The first release of the Tab5 port. The version shows as `v1.0` in Settings > About and in the boot log.
+
+- The Tab5 port: the app at 640x360 (shown 2x2), USB host on USB-A, the console on USB-C, Wi-Fi/Bluetooth through the ESP32-C6.
+- Firmware list: search by name (name, author, file, product; any case), with an on-screen keyboard and a clear button.
+- FM1 Open / FM1 Community recognised as an FM-1, with Open's updater armed before Install.
+- SMK-37 Pro (SMK37 Open, USB "SMK37 Open") recognised as an SMK-37: the list switches to it, and Install works
+  (confirmed on the real thing by the user).
+- The blue-screen fix: a use-after-free when the firmware list was rebuilt while scrolled (`531b776` / `db75043`).
+- Crash restart backstop: the RTC watchdog is armed in the panic handler, plus the stall watch and its log.
+
 ## Hardware
 
 - M5Stack Tab5: ESP32-P4 **revision v1.3** (esptool says `revision v1.x`), **16 MB flash**, the ESP32-C6 for
@@ -78,7 +90,8 @@ The current p4v1 build (2026-11-13) is:
 - Not on the Tab5: FM-1 Recover/Unbrick (it drives the S3's own USB pins), USB disk mode, USB MIDI for a computer,
   and sleep.
 - Not tried on the real thing:
-  - **Install under FM1 Open or SMK37 Open** (its updater's arming: the tag is the `.fwsc`'s sha256, which Open may not take).
+  - **Install under FM1 Open** (its updater's arming: the tag is the `.fwsc`'s sha256, which Open may not take).
+    Install on the SMK-37 Pro under SMK37 Open is now confirmed working by the user ("好了").
   - **Touch and orientation**: the touch mapping across the whole panel, and the 180-degree flip setting.
   - The RTC-watchdog crash backstop, and the stall watch's restart.
   - The `tab5-p4r3` build (P4 v3.x).

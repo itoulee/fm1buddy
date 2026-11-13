@@ -275,7 +275,7 @@ void setup() {
   }
   STAGE("ui: start");
   ui::begin();  // (the USB port otherwise: board::loop, once it knows if a computer is on it)
-  hal::log("fm1buddy: up in %u ms, %u KB internal RAM free, %u KB PSRAM free", (unsigned)millis(),
+  hal::log("fm1buddy %s (%s): up in %u ms, %u KB internal RAM free, %u KB PSRAM free", FM1BUDDY_VERSION, FM1BUDDY_BIN, (unsigned)millis(),
            (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024), (unsigned)(ESP.getFreePsram() / 1024));
   STAGE("ui: done, setup over (bluetooth, if on, from 4 s: the loop)");
 }
