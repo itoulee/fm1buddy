@@ -17,8 +17,13 @@
 
 - **Search the firmware list by name**, on the Hub's list and the SD card's: a search box with an on-screen keyboard
   and a clear button. It matches name, author, file name or product, and ignores case.
-- **FM1 Open / FM1 Community** (M-VAVE Open V14, USB `3654:7756`): recognised as an FM-1 (its identities
-  `FM1_OFFICIAL_OPEN`, `FM1_COMMUNITY_n`, `ota-FM1C_...`), and its updater is armed (cmd 0x31/0x32) before Install.
+- **FM1 Open / FM1 Community** (M-VAVE Open V14, USB `3654:7756`, product "FM1 Community"): recognised as an FM-1
+  (its identities `FM1_OFFICIAL_OPEN`, `FM1_COMMUNITY_n`, `ota-FM1C_...`), and its updater is armed (cmd 0x31/0x32)
+  before Install.
+- **SMK-37 Pro / Elite, including SMK37 Open** (USB product "SMK37 Open", no hyphen, also `3654:7756`): recognised as
+  an SMK-37 (identities `SMK-37 Pro_016`, `SMK-37 Pro_8nnnnnn`, `SMK-37 Elite_...`, earlier `SMK37P_OPEN_n`). The
+  Firmware list switches to that machine, Install is enabled for SMK packages, and Open's updater is armed the same
+  way as FM1 Open's.
 - **Logging**: every log line goes to the USB-C console, through a log task of its own. It never waits for a computer
   that isn't reading. It also goes to `/sdcard/fm1buddy/log.txt` in batches (the run before is in `log-1.txt`). Send
   `log` on the console to print both. There are also detailed USB-A attach/enumeration logs, and the reset reason by
@@ -73,7 +78,7 @@ The current p4v1 build (2026-11-13) is:
 - Not on the Tab5: FM-1 Recover/Unbrick (it drives the S3's own USB pins), USB disk mode, USB MIDI for a computer,
   and sleep.
 - Not tried on the real thing:
-  - **Install under FM1 Open** (its updater's arming: the tag is the `.fwsc`'s sha256, which Open may not take).
+  - **Install under FM1 Open or SMK37 Open** (its updater's arming: the tag is the `.fwsc`'s sha256, which Open may not take).
   - **Touch and orientation**: the touch mapping across the whole panel, and the 180-degree flip setting.
   - The RTC-watchdog crash backstop, and the stall watch's restart.
   - The `tab5-p4r3` build (P4 v3.x).

@@ -215,25 +215,54 @@ static std::string modelOf(const char* s) {
   if (!strncasecmp(s, "FM1_", 4) || !strncasecmp(s, "FM1C_", 5)) {
     return "FM-1";
   }
+  // SMK37 Open's tagged loader "ota-SMK37" + 16 hex (no underscore): an SMK-37
+  if (!strncasecmp(s, "SMK37", 5) && !strchr(s, '_')) {
+    return "SMK-37";
+  }
+  if (!strncasecmp(s, "SMK37P", 6)) {
+    return "SMK-37 Pro";
+  }
+  if (!strncasecmp(s, "SMK37E", 6)) {
+    return "SMK-37 Elite";
+  }
   const char* us = strrchr(s, '_');
   return std::string(s, us ? us - s : strlen(s));
 }
 
-// FM1 Open's identities (as sdk/WebUpdate.js's openIdentity): its updater wants to be armed first (openArm)
-static bool openIdentity(const char* t) {
-  if (!strcmp(t, "FM1_OFFICIAL_OPEN")) {
-    return true;
-  }
-  const char* digits = !strncmp(t, "FM1_COMMUNITY_", 14) ? t + 14 : !strncmp(t, "FM-1_8", 6) && strlen(t) == 12 ? t + 5 : 0;
-  if (!digits || !*digits) {
+static bool allDigits(const char* s) {
+  if (!s || !*s) {
     return false;
   }
-  for (; *digits; digits++) {
-    if (*digits < '0' || *digits > '9') {
+  for (; *s; s++) {
+    if (*s < '0' || *s > '9') {
       return false;
     }
   }
   return true;
+}
+
+// FM1 Open and SMK37 Open (their sdk/WebUpdate.js openIdentity): the updater wants to be armed first (openArm)
+static bool openIdentity(const char* t) {
+  if (!strcmp(t, "FM1_OFFICIAL_OPEN")) {
+    return true;
+  }
+  if (!strncmp(t, "FM1_COMMUNITY_", 14)) {
+    return allDigits(t + 14);
+  }
+  if (!strncmp(t, "FM-1_8", 6) && strlen(t) == 12) {
+    return allDigits(t + 5);
+  }
+  // SMK37 Open: "SMK-37 Pro_8nnnnnn", "SMK-37 Elite_8nnnnnn"; earlier builds "SMK37P_OPEN_nnn" / "SMK37E_OPEN_nnn"
+  const char* us = strrchr(t, '_');
+  if (us && allDigits(us + 1)) {
+    if (!strncmp(t, "SMK-37 Pro_8", 12) || !strncmp(t, "SMK-37 Elite_8", 14)) {
+      return strlen(us + 1) == 7;
+    }
+    if (!strncmp(t, "SMK37P_OPEN_", 12) || !strncmp(t, "SMK37E_OPEN_", 12)) {
+      return strlen(us + 1) == 3;
+    }
+  }
+  return false;
 }
 
 bool isSmk(const char* model) {
@@ -241,7 +270,8 @@ bool isSmk(const char* model) {
   for (char& c : m) {
     c = toupper(c);
   }
-  return !m.compare(0, 7, "SMK-37 ") || !m.compare(0, 7, "SMK-37+") || m == "MKE-P37" || !m.compare(0, 12, "STARRYKEY-37");
+  // "SMK-37" (the tagged loader), "SMK-37 Pro" / "SMK-37 Elite", "SMK-37+", and SMK37 Open's earlier "SMK37P" / "SMK37E"
+  return !m.compare(0, 6, "SMK-37") || !m.compare(0, 5, "SMK37") || m == "MKE-P37" || !m.compare(0, 12, "STARRYKEY-37");
 }
 
 bool sameHardware(const char* a, const char* b) {
@@ -465,6 +495,12 @@ static bool parseIdentity(const uint8_t* pkt, uint32_t n, Fm1Id& id) {
     id.version = us ? atoi(us + 1) : 0;
     return true;
   }
+  // SMK37 Open's tagged loader: "ota-SMK37" + 16 hex (no underscore)
+  if (ota && !strncasecmp(bare, "SMK37", 5) && !strchr(bare, '_')) {
+    snprintf(id.model, sizeof id.model, "ota-SMK-37");
+    id.version = 0;
+    return true;
+  }
   // MODEL_123
   char* us = strrchr(id.text, '_');
   if (!us || us == id.text || !us[1] || us - id.text >= (int)sizeof id.model) {
@@ -490,7 +526,10 @@ static void wait(uint32_t ms) {
 static bool candidateDev(const midi::Dev& v) {
   // ("fm1": M-VAVE's FM1 Open V14 calls its USB MIDI device "FM1 Community", with no hyphen; without it that FM-1 was
   // never asked who it is, so it never showed as connected, though Big Screen, which matches "fm1", reached it)
-  static const char* NAMES[] = {"fm-1", "fm1", "felucca", "ota", "composite", "sinco", "usb-midi", "smk-37", "mke-p37", "starrykey"};
+  // ("smk37": M-VAVE's SMK37 Open calls its USB MIDI device "SMK37 Open", with no hyphen, same VID:PID as
+  // FM1 Community, 3654:7756; without it that SMK-37 was never asked who it is, so Install stayed grey)
+  static const char* NAMES[] = {"fm-1", "fm1", "felucca", "ota", "composite", "sinco", "usb-midi", "smk-37", "smk37",
+                                "mke-p37", "starrykey"};
   char lower[sizeof v.name];
   uint32_t i = 0;
   for (; v.name[i]; i++) {
@@ -577,7 +616,7 @@ void fm1::watch() {
       s.askAt = now + 1500;  // it settles first
       s.done = !candidateDev(v);
       hal::log("fm1: %d (%s, %04X:%04X): %s", d, v.name, v.vid, v.pid,
-               s.done ? "not an FM-1 by its name: not asked" : "may be an FM-1: asking who it is in 1.5 s");
+               s.done ? "not an FM-1 or SMK-37 by its name: not asked" : "may be one: asking who it is in 1.5 s");
       continue;
     }
     if (s.done) {

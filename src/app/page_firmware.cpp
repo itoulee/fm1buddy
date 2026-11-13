@@ -105,9 +105,13 @@ static int machineOf(const std::string& product) {
     return FM1;
   }
   std::string m = product.compare(0, 4, "ota-") ? product : product.substr(4);
-  return !m.compare(0, 13, "SMK-37 Elite_") ? SMK_ELITE : !m.compare(0, 8, "MKE-P37_") ? MKE_P37
-                                                                                       : SMK_PRO;  // (the
-  // Starrykey 37 Play takes the Pro's)
+  if (!m.compare(0, 13, "SMK-37 Elite") || !m.compare(0, 6, "SMK37E")) {
+    return SMK_ELITE;
+  }
+  if (!m.compare(0, 8, "MKE-P37_") || !m.compare(0, 8, "MKE-P37")) {
+    return MKE_P37;
+  }
+  return SMK_PRO;  // (the Starrykey 37 Play takes the Pro's; SMK37 Open's earlier SMK37P_OPEN_n too)
 }
 
 // the Hub's list: the machine picked, or the one on the hub (the FM-1 without one)
